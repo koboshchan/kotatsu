@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AnyShell</title><script src="/app.js" defer></script></head>
+<body>
+<header><h1>AnyShell</h1><p>Your machines. Outbound connections. Unprivileged shells.</p></header>
+<main>
+<section aria-labelledby="account-title"><h2 id="account-title">Account</h2>
+<form id="register"><label>New account name <input id="name" required maxlength="80" autocomplete="username"></label> <button>Register</button></form>
+<form id="login"><label>API token <input id="token" required type="password" autocomplete="off"></label> <button>Log in</button></form>
+<p>Tokens stay in this page's memory only. Reloading logs you out.</p>
+<button id="logout" type="button">Log out</button> <span id="account"></span>
+<output id="new-token" aria-live="polite"></output> <button id="dismiss" type="button" hidden>Clear shown secret</button>
+</section>
+<p id="status" role="status"></p>
+<section aria-labelledby="inventory-title"><h2 id="inventory-title">Machines</h2>
+<button id="refresh" type="button">Refresh inventory</button>
+<table><caption>Only machines owned by your account</caption><thead><tr><th scope="col">Machine ID</th><th scope="col">Name</th><th scope="col">State</th><th scope="col">Public IP</th><th scope="col">Added</th><th scope="col">Last seen</th></tr></thead><tbody id="machines"></tbody></table>
+<p>Connect from your terminal with <code>anyshell connect &lt;machine-id&gt;</code>.</p>
+</section>
+<section aria-labelledby="enrollment-title"><h2 id="enrollment-title">Enrollment tokens</h2>
+<form id="enroll"><label>Lifetime in minutes <input id="ttl" type="number" min="1" max="1440" value="15" required></label>
+<label><input id="reusable" type="checkbox"> Reusable until expiration</label> <button>Create install token</button></form>
+<p>Default tokens enroll one machine and expire after 15 minutes. Installer URLs are bearer secrets. Run installers only on Linux machines you own or administer.</p>
+<table><caption>Install-token status, without stored secrets</caption><thead><tr><th scope="col">ID</th><th scope="col">Expires</th><th scope="col">Reusable</th><th scope="col">Uses</th><th scope="col">Revoked</th><th scope="col">Action</th></tr></thead><tbody id="enrollments"></tbody></table>
+</section>
+</main>
+</body></html>

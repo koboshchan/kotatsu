@@ -1,8 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/version"
+	"github.com/koboshchan/anyshell/internal/client"
+	"os"
+	"os/signal"
 )
 
-func main() { fmt.Println("anyshell anyshell", version.Version) }
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := client.NewCommand().ExecuteContext(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
