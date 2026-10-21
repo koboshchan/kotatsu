@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"github.com/koboshchan/anyshell/internal/agent"
 	"github.com/koboshchan/anyshell/internal/api"
 	"github.com/koboshchan/anyshell/internal/relay"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -97,5 +99,55 @@ func TestAgentAuthenticatedBeforeRevocationCannotRegister(t *testing.T) {
 	s.mu.Unlock()
 	if link != nil {
 		t.Fatal("revoked link registered")
+	}
+}
+
+func TestAgentAutomaticallyReconnectsAfterTransportDrop(t *testing.T) {
+	s := testServer(t)
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, _ := s.Store.Register(ctx, "reconnect")
+	token, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	state, e := agent.Enroll(ctx, srv.URL, token.Token, filepath.Join(t.TempDir(), "agent.json"), true)
+	if e != nil {
+		t.Fatal(e)
+	}
+	done := make(chan error, 1)
+	go func() { done <- agent.Run(ctx, state) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("agent shutdown timeout")
+		}
+	}()
+	waitLink := func(previous *agentLink) *agentLink {
+		limit := time.After(5 * time.Second)
+		for {
+			s.mu.Lock()
+			current := s.agents[state.Machine.ID]
+			s.mu.Unlock()
+			if current != nil && current != previous {
+				return current
+			}
+			select {
+			case <-limit:
+				t.Fatal("agent did not reconnect")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	old := waitLink(nil)
+	old.conn.CloseNow()
+	replacement := waitLink(old)
+	if replacement == nil {
+		t.Fatal("no replacement")
+	}
+	machines, _ := s.Store.Machines(ctx, a.Account.ID)
+	if len(machines) != 1 || machines[0].ID != state.Machine.ID {
+		t.Fatal(machines)
 	}
 }

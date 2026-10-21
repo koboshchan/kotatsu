@@ -140,6 +140,7 @@ command -v systemctl >/dev/null || die "systemd is required"
 command -v curl >/dev/null || die "install curl first"
 command -v sha256sum >/dev/null || die "install sha256sum first"
 command -v tar >/dev/null || die "install tar first"
+for tool in getent useradd install runuser awk; do command -v "$tool" >/dev/null || die "install missing prerequisite $tool first"; done
 [ ! -e /var/lib/anyshell/agent.json ] || die "already enrolled; uninstall explicitly before enrolling again"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
@@ -150,7 +151,7 @@ ARTIFACT="anyshell-agent_${VERSION}_linux_${ARCH}.tar.gz"
 echo "AnyShell: downloading pinned release $VERSION for $ARCH"
 fetch "$RELEASE_ORIGIN/releases/$VERSION/$ARTIFACT" "$WORK/$ARTIFACT" || die "agent download failed"
 fetch "$RELEASE_ORIGIN/releases/$VERSION/SHA256SUMS" "$WORK/SHA256SUMS" || die "checksum download failed"
-(cd "$WORK"; grep "  $ARTIFACT$" SHA256SUMS > selected; [ "$(wc -l < selected)" -eq 1 ] && sha256sum -c selected) || die "checksum verification failed; nothing installed"
+(cd "$WORK"; awk -v artifact="$ARTIFACT" '$2 == artifact { print }' SHA256SUMS > selected; [ "$(wc -l < selected)" -eq 1 ] && sha256sum -c selected) || die "checksum verification failed; nothing installed"
 tar -tzf "$WORK/$ARTIFACT" > "$WORK/contents"
 [ "$(cat "$WORK/contents")" = anyshell-agent ] || die "unexpected release archive contents"
 tar -xzf "$WORK/$ARTIFACT" -C "$WORK" --no-same-owner

@@ -8,15 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coder/websocket"
+	"github.com/creack/pty"
 	"github.com/koboshchan/anyshell/internal/agent"
 	"github.com/koboshchan/anyshell/internal/api"
 	"github.com/koboshchan/anyshell/internal/client"
+	"github.com/koboshchan/anyshell/internal/config"
 	"github.com/koboshchan/anyshell/internal/relay"
 	"github.com/koboshchan/anyshell/internal/server"
 	"github.com/koboshchan/anyshell/internal/store"
+	"golang.org/x/term"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -319,5 +324,93 @@ func TestDetachedProcessKilledOnDisconnect(t *testing.T) {
 			t.Fatalf("detached process %d survived disconnect", pid)
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+func TestIdleAndMaximumSessionExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		idle, max time.Duration
+	}{{"idle", 80 * time.Millisecond, time.Hour}, {"maximum", time.Hour, 80 * time.Millisecond}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.app.Config.SessionIdle = tc.idle
+			f.app.Config.SessionMax = tc.max
+			c := f.dial(t, f.alice.Token.Token)
+			defer c.CloseNow()
+			ctx := ready(t, c)
+			for {
+				_, e := relay.Read(ctx, c)
+				if e != nil {
+					break
+				}
+			}
+			if ctx.Err() != nil {
+				t.Fatal("session expiry not enforced")
+			}
+		})
+	}
+}
+
+func TestCLI_SIGTERMRestoresTerminal(t *testing.T) {
+	f := newFixture(t)
+	probe := f.dial(t, f.alice.Token.Token)
+	probe.CloseNow()
+	binary := filepath.Join(t.TempDir(), "anyshell")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/anyshell")
+	build.Dir = "../.."
+	if b, e := build.CombinedOutput(); e != nil {
+		t.Fatal(e, string(b))
+	}
+	cfgPath := filepath.Join(t.TempDir(), "config")
+	if e := config.PrivateJSON(cfgPath, config.Client{Server: f.http.URL, Token: f.alice.Token.Token, Dev: true}); e != nil {
+		t.Fatal(e)
+	}
+	master, slave, e := pty.Open()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer master.Close()
+	defer slave.Close()
+	original, e := term.GetState(int(slave.Fd()))
+	if e != nil {
+		t.Fatal(e)
+	}
+	command := exec.Command(binary, "--config", cfgPath, "connect", f.machine.Machine.DisplayID)
+	command.Stdin = slave
+	command.Stdout = slave
+	command.Stderr = slave
+	if e = command.Start(); e != nil {
+		t.Fatal(e)
+	}
+	defer command.Process.Kill()
+	rawDeadline := time.After(4 * time.Second)
+	for {
+		current, e := term.GetState(int(slave.Fd()))
+		if e != nil {
+			t.Fatal(e)
+		}
+		if !reflect.DeepEqual(current, original) {
+			break
+		}
+		select {
+		case <-rawDeadline:
+			t.Fatal("CLI did not enter raw mode")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if e = command.Process.Signal(syscall.SIGTERM); e != nil {
+		t.Fatal(e)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CLI did not stop on SIGTERM")
+	}
+	restored, e := term.GetState(int(slave.Fd()))
+	if e != nil || !reflect.DeepEqual(restored, original) {
+		t.Fatal("terminal was not restored", e)
 	}
 }

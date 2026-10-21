@@ -219,13 +219,15 @@ func (s *Server) cliSocket(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		cancel()
 		s.mu.Lock()
-		delete(s.sessions, session.id)
 		close(session.done)
 		s.mu.Unlock()
 		closeCtx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 		defer stop()
 		_ = relay.Write(closeCtx, link.conn, relay.Frame{Type: "close", Session: session.id})
 		_ = s.Store.EndSession(closeCtx, session.id, reason)
+		s.mu.Lock()
+		delete(s.sessions, session.id)
+		s.mu.Unlock()
 		s.Log.Info("session ended", "session", session.id, "reason", reason)
 	}()
 	if err = s.Store.StartSession(ctx, session.id, i.Account.ID, m.ID); err != nil {
