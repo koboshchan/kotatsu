@@ -5,6 +5,8 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"github.com/coder/websocket"
 	"github.com/koboshchan/anyshell/internal/agent"
 	"github.com/koboshchan/anyshell/internal/api"
@@ -13,8 +15,11 @@ import (
 	"github.com/koboshchan/anyshell/internal/server"
 	"github.com/koboshchan/anyshell/internal/store"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -235,5 +240,84 @@ func TestClientCannotChooseSessionOrCommand(t *testing.T) {
 	}
 	if ctx.Err() != nil {
 		t.Fatal("invalid frame not rejected")
+	}
+}
+
+func TestPipedEOFAndMachineRevocation(t *testing.T) {
+	f := newFixture(t)
+	probe := f.dial(t, f.alice.Token.Token)
+	probe.CloseNow()
+	cli, _ := client.New(f.http.URL, f.alice.Token.Token, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var output bytes.Buffer
+	if e := cli.Connect(ctx, f.machine.Machine.DisplayID, strings.NewReader("printf 'EOF_%s\\n' OK\n"), &output); e != nil {
+		t.Fatal(e, output.String())
+	}
+	if !strings.Contains(output.String(), "EOF_OK") {
+		t.Fatal(output.String())
+	}
+	c := f.dial(t, f.alice.Token.Token)
+	defer c.CloseNow()
+	session := ready(t, c)
+	bob, _ := client.New(f.http.URL, f.bob.Token.Token, true)
+	if e := bob.Do(session, "DELETE", api.Prefix+"/machines/"+f.machine.Machine.DisplayID, nil, nil); e == nil {
+		t.Fatal("IDOR machine revoke")
+	}
+	if e := cli.Do(session, "DELETE", api.Prefix+"/machines/"+f.machine.Machine.DisplayID, nil, nil); e != nil {
+		t.Fatal(e)
+	}
+	for {
+		_, e := relay.Read(session, c)
+		if e != nil {
+			break
+		}
+	}
+	if session.Err() != nil {
+		t.Fatal("machine revocation did not close session")
+	}
+	if _, e := f.db.MachineAuth(ctx, f.machine.Credential); e != store.ErrUnauthorized {
+		t.Fatal(e)
+	}
+	if c, e := relay.Dial(ctx, f.http.URL, api.Prefix+"/agent/connect", f.machine.Credential); e == nil {
+		c.CloseNow()
+		t.Fatal("revoked machine reconnect")
+	}
+}
+
+func TestDetachedProcessKilledOnDisconnect(t *testing.T) {
+	f := newFixture(t)
+	c := f.dial(t, f.alice.Token.Token)
+	ctx := ready(t, c)
+	file := filepath.Join(t.TempDir(), "detached.pid")
+	// setsid is a common intentional detachment that process-group-only cleanup
+	// misses. The per-session subreaper must still reap this process.
+	command := fmt.Sprintf("setsid /bin/sh -c 'echo $$ > %s; exec sleep 60' >/dev/null 2>&1 < /dev/null &\n", file)
+	_ = relay.Write(ctx, c, relay.Frame{Type: "data", Data: []byte(command)})
+	deadline := time.After(3 * time.Second)
+	var pid int
+	for pid == 0 {
+		b, _ := os.ReadFile(file)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		if pid == 0 {
+			select {
+			case <-deadline:
+				t.Fatal("detached process did not start")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	_ = c.CloseNow()
+	deadline = time.After(4 * time.Second)
+	for {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("detached process %d survived disconnect", pid)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

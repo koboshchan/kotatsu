@@ -104,7 +104,7 @@ func (s *Store) Enroll(ctx context.Context, in api.EnrollRequest, ip string) (ap
 		if !errors.Is(err, sql.ErrNoRows) {
 			return out, err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO machines VALUES(?,?,?,?,?,?,?,?,?)", m.ID, m.DisplayID, owner, m.Name, m.Platform, ip, m.CreatedAt.Unix(), m.LastSeen.Unix(), auth.Hash(credential))
+		_, err = tx.ExecContext(ctx, "INSERT INTO machines(id,display_id,owner_id,name,platform,public_ip,created_at,last_seen,credential_hash) VALUES(?,?,?,?,?,?,?,?,?)", m.ID, m.DisplayID, owner, m.Name, m.Platform, ip, m.CreatedAt.Unix(), m.LastSeen.Unix(), auth.Hash(credential))
 		if err != nil {
 			return out, err
 		}
@@ -118,17 +118,17 @@ func (s *Store) Enroll(ctx context.Context, in api.EnrollRequest, ip string) (ap
 func scanMachine(row interface{ Scan(...any) error }, now time.Time) (api.Machine, error) {
 	var m api.Machine
 	var created, seen int64
-	err := row.Scan(&m.ID, &m.DisplayID, &m.Name, &m.Platform, &m.PublicIP, &created, &seen)
+	err := row.Scan(&m.ID, &m.DisplayID, &m.Name, &m.Platform, &m.PublicIP, &created, &seen, &m.Revoked)
 	m.CreatedAt = time.Unix(created, 0).UTC()
 	m.LastSeen = time.Unix(seen, 0).UTC()
-	m.Online = now.Sub(m.LastSeen) < 90*time.Second
+	m.Online = !m.Revoked && now.Sub(m.LastSeen) < 90*time.Second
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
 	}
 	return m, err
 }
 
-const machineColumns = "id,display_id,name,platform,public_ip,created_at,last_seen"
+const machineColumns = "id,display_id,name,platform,public_ip,created_at,last_seen,revoked"
 
 func (s *Store) Machines(ctx context.Context, owner string) ([]api.Machine, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE owner_id=? ORDER BY created_at,display_id", owner)
@@ -150,14 +150,26 @@ func (s *Store) OwnedMachine(ctx context.Context, owner, displayID string) (api.
 	return scanMachine(s.db.QueryRowContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE owner_id=? AND display_id=?", owner, displayID), s.Now())
 }
 func (s *Store) MachineAuth(ctx context.Context, credential string) (api.Machine, error) {
-	m, err := scanMachine(s.db.QueryRowContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE credential_hash=?", auth.Hash(credential)), s.Now())
+	m, err := scanMachine(s.db.QueryRowContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE credential_hash=? AND revoked=0", auth.Hash(credential)), s.Now())
 	if errors.Is(err, ErrNotFound) {
 		return m, ErrUnauthorized
 	}
 	return m, err
 }
 func (s *Store) Heartbeat(ctx context.Context, machineID, ip string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE machines SET last_seen=?,public_ip=? WHERE id=?", s.Now().Unix(), ip, machineID)
+	r, err := s.db.ExecContext(ctx, "UPDATE machines SET last_seen=?,public_ip=? WHERE id=? AND revoked=0", s.Now().Unix(), ip, machineID)
+	if err != nil {
+		return err
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RevokeMachine(ctx context.Context, owner, displayID string) error {
+	r, err := s.db.ExecContext(ctx, "UPDATE machines SET revoked=1 WHERE owner_id=? AND display_id=?", owner, displayID)
 	if err != nil {
 		return err
 	}

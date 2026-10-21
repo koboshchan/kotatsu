@@ -26,6 +26,7 @@ type Enrollment struct {
 	Revoked   bool      `json:"revoked"`
 }
 type Machine struct {
+	Revoked   bool      `json:"revoked"`
 	ID        string    `json:"id"`
 	DisplayID string    `json:"display_id"`
 	Name      string    `json:"name"`

@@ -195,7 +195,16 @@ func NewCommand() *cobra.Command {
 		return w.Flush()
 	}}
 	ls.Flags().BoolVar(&asJSON, "json", false, "print inventory as JSON")
-	root.AddCommand(ls, connectCommand(get))
+	root.AddCommand(ls, connectCommand(get), &cobra.Command{Use: "revoke-machine <machine-id>", Short: "Permanently revoke a machine credential and terminate its sessions", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if !displayID.MatchString(args[0]) {
+			return errors.New("machine ID must contain seven digits")
+		}
+		c, e := get()
+		if e != nil {
+			return e
+		}
+		return c.Do(cmd.Context(), "DELETE", api.Prefix+"/machines/"+args[0], nil, nil)
+	}})
 	enrollment := &cobra.Command{Use: "enrollment", Short: "Manage install tokens"}
 	var reusable bool
 	var ttl time.Duration

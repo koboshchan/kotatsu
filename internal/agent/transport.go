@@ -127,9 +127,12 @@ func serveConnection(ctx context.Context, st State) error {
 				delete(sessions, id)
 				mu.Unlock()
 			}(f.Session, session)
-		case "data":
+		case "data", "eof":
 			if session == nil {
 				continue
+			}
+			if f.Type == "eof" {
+				f.Data = []byte{4, 4}
 			}
 			select {
 			case session.input <- f.Data:

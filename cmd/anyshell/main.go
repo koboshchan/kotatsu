@@ -7,10 +7,11 @@ import (
 	"github.com/koboshchan/anyshell/internal/client"
 	"os"
 	"os/signal"
+	"syscall"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := client.NewCommand().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)

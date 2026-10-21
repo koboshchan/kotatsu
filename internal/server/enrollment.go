@@ -15,6 +15,7 @@ import (
 var releaseVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$`)
 
 func (s *Server) enrollmentRoutes() {
+	s.handle("DELETE "+api.Prefix+"/machines/{id}", s.revokeMachine)
 	s.handle("GET "+api.Prefix+"/machines", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Machines(r.Context(), identity(r).Account.ID)
 		result(w, v, e)
@@ -190,3 +191,28 @@ systemctl daemon-reload
 systemctl enable --now anyshell-agent.service || die "could not start service; check journalctl -u anyshell-agent"
 echo "AnyShell: enrolled and started. Shells run as the unprivileged anyshell user."
 `
+
+func (s *Server) revokeMachine(w http.ResponseWriter, r *http.Request) {
+	owner := identity(r).Account.ID
+	m, err := s.Store.OwnedMachine(r.Context(), owner, r.PathValue("id"))
+	if err != nil {
+		fail(w, 404, "machine not found")
+		return
+	}
+	if err = s.Store.RevokeMachine(r.Context(), owner, m.DisplayID); err != nil {
+		result(w, nil, err)
+		return
+	}
+	s.mu.Lock()
+	link := s.agents[m.ID]
+	for _, session := range s.sessions {
+		if session.machine == m.ID {
+			session.cancel()
+		}
+	}
+	s.mu.Unlock()
+	if link != nil {
+		_ = link.conn.CloseNow()
+	}
+	respond(w, 200, map[string]bool{"revoked": true})
+}

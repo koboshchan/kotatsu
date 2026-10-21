@@ -101,6 +101,12 @@ func (c *Client) Connect(ctx context.Context, id string, input io.Reader, output
 				}
 			}
 			if e != nil {
+				if errors.Is(e, io.EOF) {
+					_ = relay.Write(session, socket, relay.Frame{Type: "eof"})
+				} else {
+					cancel()
+					_ = socket.CloseNow()
+				}
 				return
 			}
 		}

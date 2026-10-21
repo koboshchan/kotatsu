@@ -68,6 +68,22 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	// Version two adds permanent owner-triggered machine credential revocation.
+	var hasRevocation int
+	if err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('machines') WHERE name='revoked'").Scan(&hasRevocation); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if hasRevocation == 0 {
+		if _, err = db.Exec("ALTER TABLE machines ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1))"); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if _, err = db.Exec("INSERT OR IGNORE INTO schema_version(version) VALUES(2)"); err != nil {
+		db.Close()
+		return nil, err
+	}
 	// Relays are deliberately transient; after a restart no historical session
 	// remains marked active.
 	_, err = db.Exec("UPDATE sessions SET ended_at=?, reason='server_restart' WHERE ended_at IS NULL", s.Now().Unix())

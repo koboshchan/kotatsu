@@ -247,8 +247,29 @@ func (s *Server) cliSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	ticker := time.NewTicker(s.checkInterval())
-	defer ticker.Stop()
+	// Watch authorization/idle independently so blocked writes cannot delay cancellation.
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		ticker := time.NewTicker(s.checkInterval())
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if session.idle() > s.idleDuration() {
+					cancel()
+					return
+				}
+				if _, e := s.Store.Authenticate(ctx, session.token); e != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	defer func() { cancel(); <-watchDone }()
 	ready := false
 	for {
 		select {
@@ -257,15 +278,6 @@ func (s *Server) cliSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-readDone:
 			return
-		case <-ticker.C:
-			if session.idle() > s.idleDuration() {
-				reason = "idle_timeout"
-				return
-			}
-			if _, err = s.Store.Authenticate(ctx, session.token); err != nil {
-				reason = "token_revoked"
-				return
-			}
 		case f := <-session.frames:
 			if f.Type == "ready" {
 				if ready {
@@ -291,7 +303,7 @@ func (s *Server) cliSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch f.Type {
-			case "data":
+			case "data", "eof":
 				session.touch()
 			case "resize":
 				if !f.ValidSize() {
