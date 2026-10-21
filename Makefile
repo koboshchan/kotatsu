@@ -1,0 +1,9 @@
+.PHONY: test build check release
+test:
+	go test -race ./...
+build:
+	go build ./cmd/...
+check: test build
+	go vet ./...
+release:
+	./scripts/release.sh
