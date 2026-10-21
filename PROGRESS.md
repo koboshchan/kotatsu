@@ -7,3 +7,6 @@ Established the Go module, three executable boundaries, shared API types, versio
 
 ## Step 2
 Added transactional SQLite migration/schema with foreign keys, UUIDs, unique token hashes, and account token registration, exchange (/me), issue, atomic rotation, listing and owner-scoped revocation. Authentication never persists raw credentials. Added bounded registration rate limiting, JSON size/schema limits, no-store responses, cross-origin mutation rejection, trusted-proxy-only forwarding, structured logs without request URLs, and a gracefully terminating HTTP entry point. Token lifecycle, persistence, permissions, and API authorization tests pass.
+
+## Step 3
+Implemented atomic one-time/reusable expiring enrollment, separate machine credentials, collision-checked seven-digit IDs, owner-only inventory, observed-IP heartbeats and 90-second offline calculation. Added the no-store, rate-limited /script endpoint with pinned Linux architecture artifacts, checksum verification, dedicated account and systemd service. Agent enrollment refuses existing state, stores private identity and rejects root execution. Tests cover concurrent single redemption, ID collision retry, account/machine/enrollment credential separation, expiry, revocation, heartbeat status and untrusted forwarded IP. Race tests/build/vet pass.

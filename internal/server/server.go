@@ -54,6 +54,7 @@ func New(s *store.Store, c Config, log *slog.Logger) (*Server, error) {
 	return v, nil
 }
 func (s *Server) routes() {
+	s.enrollmentRoutes()
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	s.mux.HandleFunc("POST "+api.Prefix+"/accounts", s.register)
 	s.handle("GET "+api.Prefix+"/me", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, identity(r).Account) })
