@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/koboshchan/anyshell/internal/api"
+	"github.com/koboshchan/anyshell/internal/relay"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -58,5 +59,43 @@ func TestInstallerCredentialSeparation(t *testing.T) {
 	s.ServeHTTP(w, httptest.NewRequest("GET", "/script/"+e.Token, nil))
 	if w.Code != 401 {
 		t.Fatal("used token")
+	}
+}
+
+func TestAgentAuthenticatedBeforeRevocationCannotRegister(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	a, _ := s.Store.Register(ctx, "race-owner")
+	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	m, err := s.Store.Enroll(ctx, api.EnrollRequest{Token: e.Token, Name: "race"}, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+	// Holding the registry lock pauses agent setup after its first authentication
+	// and WebSocket upgrade, before final validation/link registration.
+	s.mu.Lock()
+	c, err := relay.Dial(ctx, srv.URL, api.Prefix+"/agent/connect", m.Credential)
+	if err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	if err = s.Store.RevokeMachine(ctx, a.Account.ID, m.Machine.DisplayID); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	defer c.CloseNow()
+	wait, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if _, err = relay.Read(wait, c); err == nil || wait.Err() != nil {
+		t.Fatal("revoked in-flight agent link not rejected", err)
+	}
+	s.mu.Lock()
+	link := s.agents[m.Machine.ID]
+	s.mu.Unlock()
+	if link != nil {
+		t.Fatal("revoked link registered")
 	}
 }

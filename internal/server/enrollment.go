@@ -199,11 +199,12 @@ func (s *Server) revokeMachine(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "machine not found")
 		return
 	}
+	s.mu.Lock()
 	if err = s.Store.RevokeMachine(r.Context(), owner, m.DisplayID); err != nil {
+		s.mu.Unlock()
 		result(w, nil, err)
 		return
 	}
-	s.mu.Lock()
 	link := s.agents[m.ID]
 	for _, session := range s.sessions {
 		if session.machine == m.ID {

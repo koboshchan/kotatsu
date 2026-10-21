@@ -65,6 +65,10 @@ func (s *Server) agentSocket(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		return
 	}
+	if _, err = s.Store.MachineAuth(ctx, token); err != nil {
+		s.mu.Unlock()
+		return
+	}
 	old := s.agents[m.ID]
 	s.agents[m.ID] = link
 	s.mu.Unlock()
@@ -83,7 +87,9 @@ func (s *Server) agentSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Unlock()
 	}()
-	_ = s.Store.Heartbeat(ctx, m.ID, s.publicIP(r))
+	if err = s.Store.Heartbeat(ctx, m.ID, s.publicIP(r)); err != nil {
+		return
+	}
 	// Closing a silent/stuck control socket ensures no orphan relay survives.
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
