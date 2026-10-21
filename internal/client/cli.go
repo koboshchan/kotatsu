@@ -195,7 +195,7 @@ func NewCommand() *cobra.Command {
 		return w.Flush()
 	}}
 	ls.Flags().BoolVar(&asJSON, "json", false, "print inventory as JSON")
-	root.AddCommand(ls)
+	root.AddCommand(ls, connectCommand(get))
 	enrollment := &cobra.Command{Use: "enrollment", Short: "Manage install tokens"}
 	var reusable bool
 	var ttl time.Duration

@@ -60,6 +60,7 @@ func run() error {
 		}
 	case <-ctx.Done():
 	}
+	_ = app.Close()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)

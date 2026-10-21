@@ -21,6 +21,9 @@ import (
 )
 
 type Config struct {
+	SessionMax     time.Duration
+	SessionIdle    time.Duration
+	SessionCheck   time.Duration
 	PublicURL      string
 	Dev            bool
 	TrustedProxies []netip.Prefix
@@ -33,12 +36,16 @@ type bucket struct {
 	seen    time.Time
 }
 type Server struct {
-	Store  *store.Store
-	Config Config
-	Log    *slog.Logger
-	mux    *http.ServeMux
-	mu     sync.Mutex
-	limits map[string]*bucket
+	agents    map[string]*agentLink
+	sessions  map[string]*liveSession
+	agentSeen map[*agentLink]time.Time
+	closing   bool
+	Store     *store.Store
+	Config    Config
+	Log       *slog.Logger
+	mux       *http.ServeMux
+	mu        sync.Mutex
+	limits    map[string]*bucket
 }
 type identityKey struct{}
 
@@ -49,13 +56,14 @@ func New(s *store.Store, c Config, log *slog.Logger) (*Server, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	v := &Server{Store: s, Config: c, Log: log, mux: http.NewServeMux(), limits: map[string]*bucket{}}
+	v := &Server{Store: s, Config: c, Log: log, mux: http.NewServeMux(), limits: map[string]*bucket{}, agents: map[string]*agentLink{}, sessions: map[string]*liveSession{}, agentSeen: map[*agentLink]time.Time{}}
 	v.routes()
 	return v, nil
 }
 func (s *Server) routes() {
 	s.enrollmentRoutes()
 	s.uiRoutes()
+	s.relayRoutes()
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	s.mux.HandleFunc("POST "+api.Prefix+"/accounts", s.register)
 	s.handle("GET "+api.Prefix+"/me", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, identity(r).Account) })

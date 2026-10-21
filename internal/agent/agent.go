@@ -10,7 +10,6 @@ import (
 	"github.com/koboshchan/anyshell/internal/config"
 	"os"
 	"runtime"
-	"time"
 )
 
 type State struct {
@@ -54,16 +53,4 @@ func Heartbeat(ctx context.Context, st State) error {
 		return err
 	}
 	return c.Do(ctx, "POST", api.Prefix+"/agent/heartbeat", nil, nil)
-}
-func Run(ctx context.Context, st State) error {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		_ = Heartbeat(ctx, st)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		}
-	}
 }
