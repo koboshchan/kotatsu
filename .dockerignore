@@ -1,0 +1,8 @@
+.git
+bin
+dist
+data
+.env
+*.db
+*.db-*
+*.log

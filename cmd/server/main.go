@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/koboshchan/anyshell/internal/config"
 	"github.com/koboshchan/anyshell/internal/server"
 	"github.com/koboshchan/anyshell/internal/store"
@@ -24,6 +25,23 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		c := &http.Client{Timeout: 3 * time.Second}
+		req, e := http.NewRequest("GET", "http://127.0.0.1:8080/healthz", nil)
+		if e != nil {
+			return e
+		}
+		req.Header.Set("X-Forwarded-Proto", "https")
+		resp, e := c.Do(req)
+		if e != nil {
+			return e
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("healthcheck status %d", resp.StatusCode)
+		}
+		return nil
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(log)
 	dev := os.Getenv("ANYSHELL_DEV") == "1"

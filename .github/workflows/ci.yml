@@ -1,0 +1,27 @@
+name: test-and-build
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make check
+      - run: ./scripts/release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t anyshell-ci .
+      - run: ANYSHELL_PUBLIC_URL=https://shell.example.com ANYSHELL_RELEASE_VERSION=v0.1.0 ANYSHELL_RELEASE_URL=https://shell.example.com docker compose config --quiet

@@ -64,6 +64,7 @@ func (s *Server) routes() {
 	s.enrollmentRoutes()
 	s.uiRoutes()
 	s.relayRoutes()
+	s.releaseRoutes()
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	s.mux.HandleFunc("POST "+api.Prefix+"/accounts", s.register)
 	s.handle("GET "+api.Prefix+"/me", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, identity(r).Account) })
@@ -109,7 +110,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-	if !s.Config.Dev && r.TLS == nil && !(s.trusted(r) && r.Header.Get("X-Forwarded-Proto") == "https") {
+	if r.URL.Path != "/healthz" && !s.Config.Dev && r.TLS == nil && !(s.trusted(r) && r.Header.Get("X-Forwarded-Proto") == "https") {
 		fail(w, 400, "HTTPS required")
 		return
 	}

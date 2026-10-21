@@ -1,0 +1,33 @@
+services:
+  server:
+    build:
+      context: .
+      args:
+        VERSION: ${ANYSHELL_RELEASE_VERSION:-dev}
+    environment:
+      ANYSHELL_LISTEN: 0.0.0.0:8080
+      ANYSHELL_DB: /data/anyshell.db
+      ANYSHELL_PUBLIC_URL: ${ANYSHELL_PUBLIC_URL:?Set the public HTTPS origin}
+      ANYSHELL_TRUSTED_PROXIES: ${ANYSHELL_TRUSTED_PROXIES:-}
+      ANYSHELL_RELEASE_VERSION: ${ANYSHELL_RELEASE_VERSION:?Set a pinned release tag}
+      ANYSHELL_RELEASE_URL: ${ANYSHELL_RELEASE_URL:?Set the HTTPS release origin}
+    ports:
+      - "127.0.0.1:${ANYSHELL_PORT:-28473}:8080"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/anyshell-server", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    stop_grace_period: 15s
+volumes:
+  data:
