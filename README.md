@@ -86,6 +86,8 @@ For GitHub-hosted release assets, map this path to the tagged GitHub download at
 
 Download the private URL printed by `enrollment create` to a mode-600 temporary file, review the script, then run it with sudo on a Linux systemd host you administer. The URL and script contain a live bearer credential. Keep them out of history, logs and process arguments; delete the script after use.
 
+The installer requires a running systemd manager and rejects non-systemd hosts before downloading or consuming an enrollment token. Use the manual agent commands above on other Linux hosts.
+
 The installer verifies Linux prerequisites and the artifact checksum, creates the `kotatsu` service account, enrolls via stdin and enables `kotatsu-agent.service`. Identity persists at `/var/lib/kotatsu/agent.json`. Reinstalling refuses to overwrite an existing identity.
 
 ```sh
@@ -150,6 +152,6 @@ VERSION=v0.1.0 ./scripts/release.sh
 `make check` runs race tests, executable builds and vet. The release script cross-compiles five CGO-free CLI targets and two Linux agent targets, embeds version metadata and writes checksums with deterministic archive headers. Push/PR CI runs these checks and a Docker build; tagged CI publishes release archives.
 
 > [!NOTE]
-> Linux PTY, reconnect, revocation, terminal restoration and installer harness tests pass in the development sandbox. Installer account/systemd actions are redirected or stubbed in that harness. Real Docker deployment and real systemd service runtime have not been tested here. Cross-compilation is not runtime validation on macOS, Windows or Linux arm64.
+> Live Linux tests passed through a public HTTPS/WebSocket tunnel with three independent agent sandboxes and two accounts: pinned installer downloads and checksums, enrollment, account isolation, PTYs, resize/exit codes, credential revocation, agent/server reconnect, 90-second offline detection and CLI terminal restoration. Browser checks verified isolated inventories, logout and no persisted credentials after reload. These sandboxes use direct agent execution because PID 1 is not systemd. Real Docker deployment and real systemd service runtime remain untested. Cross-compilation is not runtime validation on macOS, Windows or Linux arm64.
 
 See [PROGRESS.md](PROGRESS.md) for implementation and validation details, and [PLAN.md](PLAN.md) for the original scope.
