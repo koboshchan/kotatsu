@@ -13,7 +13,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Start disposable MongoDB replica set
+        run: |
+          docker run -d --name kotatsu-qa-ci-mongo -p 127.0.0.1:27017:27017 mongo:7 mongod --replSet kotatsu --bind_ip_all --noauth
+          for i in $(seq 1 60); do
+            docker exec kotatsu-qa-ci-mongo mongosh --quiet --eval 'try { rs.status() } catch(e) { rs.initiate({_id:"kotatsu",members:[{_id:0,host:"localhost:27017"}]}) }; if(!db.hello().isWritablePrimary) quit(1)' && break
+            test "$i" -lt 60 || exit 1
+            sleep 1
+          done
       - run: make check
+        env:
+          KOTATSU_TEST_MONGO_URI: mongodb://localhost:27017/?replicaSet=kotatsu
+      - if: always()
+        run: docker rm -fv kotatsu-qa-ci-mongo
       - run: ./scripts/release.sh
       - uses: actions/upload-artifact@v4
         with:

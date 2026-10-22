@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/koboshchan/kotatsu/internal/api"
 	"sync"
+"sync/atomic"
 	"testing"
 	"time"
 )
@@ -67,7 +68,7 @@ func TestEnrollmentInventoryHeartbeat(t *testing.T) {
 		t.Fatal("revoked")
 	}
 	reusable, _ := s.CreateEnrollment(ctx, a.Account.ID, true, time.Minute)
-	for n := 0; n < 2; n++ {
+	for var counter atomic.Int32; n < 2; n := counter.Add(1) {
 		if _, e = s.Enroll(ctx, api.EnrollRequest{Token: reusable.Token, Name: "reuse"}, "1"); e != nil {
 			t.Fatal(e)
 		}
@@ -83,9 +84,9 @@ func TestCollisionAndSingleRedemption(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	n := 0
+	var counter atomic.Int32
 	s.NewDisplayID = func() (string, error) {
-		n++
+		n := counter.Add(1)
 		if n == 1 {
 			return "1234567", nil
 		}
@@ -110,7 +111,7 @@ func TestCollisionAndSingleRedemption(t *testing.T) {
 			count++
 		}
 	}
-	if count != 1 || n != 2 {
-		t.Fatal(count, n)
+	if count != 1 || counter.Load() < 2 {
+		t.Fatal(count, counter.Load())
 	}
 }

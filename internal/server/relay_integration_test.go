@@ -282,10 +282,12 @@ func TestPipedEOFAndMachineRevocation(t *testing.T) {
 	if session.Err() != nil {
 		t.Fatal("machine revocation did not close session")
 	}
-	if _, e := f.db.MachineAuth(ctx, f.machine.Credential); e != store.ErrUnauthorized {
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer verifyCancel()
+	if _, e := f.db.MachineAuth(verifyCtx, f.machine.Credential); e != store.ErrUnauthorized {
 		t.Fatal(e)
 	}
-	if c, e := relay.Dial(ctx, f.http.URL, api.Prefix+"/agent/connect", f.machine.Credential); e == nil {
+	if c, e := relay.Dial(verifyCtx, f.http.URL, api.Prefix+"/agent/connect", f.machine.Credential); e == nil {
 		c.CloseNow()
 		t.Fatal("revoked machine reconnect")
 	}
