@@ -34,6 +34,7 @@ func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 		want       string
 	}{
 		{"unsupported", "riscv64", "unsupported architecture"},
+		{"no-running-systemd", "x86_64", "systemd must be running"},
 		{"amd64-bad-checksum", "x86_64", "checksum verification failed"},
 		{"arm64-bad-checksum", "aarch64", "checksum verification failed"},
 	} {
@@ -48,7 +49,11 @@ func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 			}
 			write("uname", "if [ \"$1\" = -s ]; then echo Linux; else echo "+tc.arch+"; fi")
 			write("id", "echo 0")
-			write("systemctl", "exit 0")
+			if tc.name == "no-running-systemd" {
+				write("systemctl", "exit 1")
+			} else {
+				write("systemctl", "exit 0")
+			}
 			// Curl flags are intentionally parsed rather than depending on their order.
 			write("curl", `url= out=
 while [ "$#" -gt 0 ]; do case "$1" in -o) shift; out=$1;; http*) url=$1;; esac; shift; done

@@ -137,6 +137,7 @@ echo "Kotatsu: checking Linux/systemd prerequisites"
 case "$(uname -m)" in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported architecture" ;; esac
 [ "$(id -u)" = 0 ] || die "run this installer as root"
 command -v systemctl >/dev/null || die "systemd is required"
+systemctl show-environment >/dev/null 2>&1 || die "systemd must be running; use direct agent enrollment on non-systemd hosts"
 command -v curl >/dev/null || die "install curl first"
 command -v sha256sum >/dev/null || die "install sha256sum first"
 command -v tar >/dev/null || die "install tar first"
