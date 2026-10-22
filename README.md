@@ -23,14 +23,17 @@ Build from source with Go 1.27.2 or later. Release packaging also requires GNU t
 ```sh
 git clone https://github.com/koboshchan/kotatsu.git
 cd kotatsu
-make check
+KOTATSU_TEST_MONGO_URI="mongodb://mongo:27017/?replicaSet=kotatsu" make check
 mkdir -p bin
 go build -o bin/kotatsu-server ./cmd/server
 go build -o bin/kotatsu ./cmd/kotatsu
 go build -o bin/kotatsu-agent ./cmd/agent
-KOTATSU_DEV=1 KOTATSU_LISTEN=127.0.0.1:28473 \
+KOTATSU_MONGO_URI="mongodb://mongo:27017/?replicaSet=kotatsu" \
+  KOTATSU_DEV=1 KOTATSU_LISTEN=127.0.0.1:28473 \
   KOTATSU_PUBLIC_URL=http://127.0.0.1:28473 ./bin/kotatsu-server
 ```
+
+The commands above assume a private MongoDB replica set named `kotatsu` reachable at `mongo` (run on the same Docker network, or substitute your own private replica-set URI). The server requires it; tests skip database cases when `KOTATSU_TEST_MONGO_URI` is unset. CI always supplies a disposable replica set. There is no automatic migration from older SQLite files.
 
 In another terminal, register and create a one-use enrollment token.
 
@@ -154,6 +157,6 @@ VERSION=v0.1.0 ./scripts/release.sh
 `make check` runs race tests, executable builds and vet. The release script cross-compiles five CGO-free CLI targets and two Linux agent targets, embeds version metadata and writes checksums with deterministic archive headers. Push/PR CI runs these checks and a Docker build; tagged CI publishes release archives.
 
 > [!NOTE]
-> Live Linux tests passed through a public HTTPS/WebSocket tunnel with three independent agent sandboxes and two accounts: pinned installer downloads and checksums, enrollment, account isolation, PTYs, resize/exit codes, credential revocation, agent/server reconnect, 90-second offline detection and CLI terminal restoration. Browser checks verified isolated inventories, logout and no persisted credentials after reload. These sandboxes use direct agent execution because PID 1 is not systemd. Real Docker deployment and real systemd service runtime remain untested. Cross-compilation is not runtime validation on macOS, Windows or Linux arm64.
+> Live Linux tests passed through a public HTTPS/WebSocket tunnel with three independent agent sandboxes and two accounts: pinned installer downloads and checksums, enrollment, account isolation, PTYs, resize/exit codes, credential revocation, agent/server reconnect, 90-second offline detection and CLI terminal restoration. Browser checks verified isolated inventories, logout and no persisted credentials after reload. These sandboxes use direct agent execution because PID 1 is not systemd. Real Docker Compose with MongoDB 7 and three Linux amd64 containers running systemd as PID 1 also passed: installer checksums, restricted service user, active/enabled units, service and container restarts, PTY commands/resize/exit, account isolation, server/database restarts with persistent data, revoked credentials, offline detection and shipped uninstall with purge. The test host required host cgroup namespaces and a writable cgroup mount for systemd, but no privileged containers. Cross-compilation is not runtime validation on macOS, Windows or Linux arm64.
 
 See [PROGRESS.md](PROGRESS.md) for implementation and validation details, and [PLAN.md](PLAN.md) for the original scope.
