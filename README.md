@@ -1,12 +1,28 @@
 # Kotatsu
 
-Self-hosted machine inventory and interactive remote shells in Go. Linux agents connect outbound to one server; no inbound agent port, network tunneling or port forwarding is implemented. Shells run as the restricted service account, not as your personal user.
+[![CI](https://github.com/koboshchan/kotatsu/actions/workflows/ci.yml/badge.svg)](https://github.com/koboshchan/kotatsu/actions/workflows/ci.yml)
 
-## Try it locally
+Self-hosted machine inventory and remote terminals. Linux agents connect outbound to your server, and you open interactive shells from the `kotatsu` CLI. No inbound agent ports, network tunnels or port forwarding.
 
-Requires Go 1.27.2 or later. Building release archives also needs GNU tar, gzip and sha256sum.
+> [!IMPORTANT]
+> Shells run as a dedicated unprivileged service account, not your personal user. The server relays live terminal bytes and must be trusted. This is transport TLS, not end-to-end encryption or a sandbox for untrusted code.
+
+## Features
+
+- Account-owned machine inventory in a CLI and plain browser UI.
+- Interactive Linux PTYs with resizing, exit codes and automatic agent reconnection.
+- Separate account, enrollment and machine credentials with expiry and revocation.
+- Short-lived installers with pinned, checksummed Linux agent downloads.
+- SQLite storage, Docker Compose configuration and hardened systemd agent units.
+- Standalone CLI builds for Linux amd64/arm64, macOS arm64 and Windows amd64/arm64.
+
+## Installation and quick start
+
+Build from source with Go 1.27.2 or later. Release packaging also requires GNU tar, gzip and sha256sum. Agents require Linux amd64 or arm64; automatic service installation requires systemd and root access to install the dedicated account.
 
 ```sh
+git clone https://github.com/koboshchan/kotatsu.git
+cd kotatsu
 make check
 mkdir -p bin
 go build -o bin/kotatsu-server ./cmd/server
@@ -16,43 +32,74 @@ KOTATSU_DEV=1 KOTATSU_LISTEN=127.0.0.1:28473 \
   KOTATSU_PUBLIC_URL=http://127.0.0.1:28473 ./bin/kotatsu-server
 ```
 
-In another terminal, register and create a short-lived install credential.
+In another terminal, register and create a one-use enrollment token.
 
 ```sh
 ./bin/kotatsu --server http://127.0.0.1:28473 --dev auth register --name alice
 ./bin/kotatsu enrollment create
 ```
 
-Save the API token shown once. The CLI also writes it to the platform user-config directory under `kotatsu/config.json`, atomically with owner-only permissions where supported. `auth login` accepts a hidden prompt or stdin. Do not put credentials in shell arguments, shared files or public logs. On Windows, use your private user profile and verify its ACLs; POSIX mode bits do not establish a Windows ACL.
+Save the API token shown once. The CLI saves its configuration under `kotatsu/config.json` in your platform's user-config directory. Writes are atomic and owner-only where supported. On Windows, use a private user profile and verify its ACLs; POSIX mode bits are not Windows ACLs.
 
-For manual sandbox enrollment, run the agent as a non-root account. Pass the install token on stdin and choose a private state path.
+For a manual local test, run the agent as a non-root account. The enroll command reads the enrollment token from stdin followed by a newline, rather than a command-line argument.
 
 ```sh
 ./bin/kotatsu-agent enroll --server http://127.0.0.1:28473 --dev --state "$HOME/.config/kotatsu-agent/agent.json"
 ./bin/kotatsu-agent run --state "$HOME/.config/kotatsu-agent/agent.json"
+```
+
+From your CLI terminal, list your machines and connect using the returned seven-digit ID.
+
+```sh
 ./bin/kotatsu ls
 ./bin/kotatsu connect 1234567
 ```
 
-Replace 1234567 with your machine ID. Ctrl-] detaches locally. Terminal dimensions and TERM are negotiated; Unix clients handle SIGWINCH, and Windows clients poll console size. The browser UI is available at the server origin, using the same owner-scoped API. Its token stays in page memory only.
+Ctrl-] detaches locally. Unix clients use SIGWINCH for resizing; Windows clients poll console size. The browser UI at the server origin manages accounts, inventory and enrollment tokens; interactive terminals use the CLI. Browser tokens stay in page memory only.
+
+## Commands
+
+```text
+kotatsu auth register --name alice
+kotatsu auth login
+kotatsu auth whoami
+kotatsu auth logout
+kotatsu auth tokens
+kotatsu auth token-create
+kotatsu auth rotate
+kotatsu auth revoke <token-id>
+kotatsu enrollment create [--reusable] [--ttl 15m]
+kotatsu enrollment ls
+kotatsu enrollment revoke <token-id>
+kotatsu ls [--json]
+kotatsu connect <machine-id>
+kotatsu revoke-machine <machine-id>
+```
+
+Global flags are `--server`, `--config` and `--dev`. Run `kotatsu --help` or a subcommand's `--help` for details. Login reads a hidden terminal prompt or stdin. Keep credentials out of shell arguments, shared files and logs.
 
 ## Linux service installation
 
-Publish a pinned release first. Configure `KOTATSU_RELEASE_VERSION=v0.1.0` and `KOTATSU_RELEASE_URL=https://releases.example.com`. The origin must serve `/releases/v0.1.0/SHA256SUMS` and the matching `kotatsu-agent_v0.1.0_linux_amd64.tar.gz` or arm64 archive. For GitHub releases, use a reverse proxy mapping this path to the tagged GitHub download; the server also supports `KOTATSU_RELEASE_DIR` for a directory containing allowlisted release files.
+Publish a pinned release before using the generated installer. Set `KOTATSU_RELEASE_VERSION=v0.1.0` and `KOTATSU_RELEASE_URL=https://releases.example.com`. That origin must serve `/releases/v0.1.0/SHA256SUMS` and `kotatsu-agent_v0.1.0_linux_amd64.tar.gz` or its arm64 equivalent.
 
-Open the private installer URL returned by `enrollment create`, download the script to a mode-600 temporary file, review it, then run it with sudo on a Linux systemd host you administer. Avoid a credential-bearing URL in command history or process arguments. The script contains a live enrollment token, so delete it after use.
+For GitHub-hosted release assets, map this path to the tagged GitHub download at your reverse proxy. Alternatively, `KOTATSU_RELEASE_DIR` serves an allowlisted local release directory through the server.
 
-The installer checks Linux architecture and prerequisites, verifies the exact artifact against the pinned SHA-256 manifest, creates an `kotatsu` system account, enrolls without putting the token in process arguments, and enables `kotatsu-agent.service`. A machine restart retains its credential in `/var/lib/kotatsu/agent.json`.
+Download the private URL printed by `enrollment create` to a mode-600 temporary file, review the script, then run it with sudo on a Linux systemd host you administer. The URL and script contain a live bearer credential. Keep them out of history, logs and process arguments; delete the script after use.
 
-Checksums authenticate the artifact only to the trusted HTTPS release origin. Compromise of that origin can replace both artifact and manifest; do not treat a checksum as an independent signature.
+The installer verifies Linux prerequisites and the artifact checksum, creates the `kotatsu` service account, enrolls via stdin and enables `kotatsu-agent.service`. Identity persists at `/var/lib/kotatsu/agent.json`. Reinstalling refuses to overwrite an existing identity.
 
-Inspect service logs with `journalctl -u kotatsu-agent`. Reconnect uses bounded exponential backoff with jitter. Heartbeats run every 30 seconds; inventory goes offline after 90 seconds without a heartbeat. Re-running the installer refuses to overwrite an existing identity.
+```sh
+journalctl -u kotatsu-agent
+sudo scripts/uninstall-agent.sh
+# Also delete local credentials and the dedicated account:
+sudo scripts/uninstall-agent.sh --purge
+```
 
-To uninstall, run `sudo scripts/uninstall-agent.sh`. Add `--purge` only when you intend to delete that machine's local credential and the dedicated account.
+Checksums depend on trusting the HTTPS release origin. An attacker controlling that origin can replace both the artifact and manifest; checksums are not independent signatures.
 
-## Deploy with Docker Compose
+## Docker deployment and configuration
 
-Set these values in a private deployment environment file, then run `docker compose up -d --build`.
+Create a private deployment environment file and run `docker compose up -d --build`.
 
 ```dotenv
 KOTATSU_PUBLIC_URL=https://shell.example.com
@@ -62,23 +109,35 @@ KOTATSU_RELEASE_URL=https://releases.example.com
 KOTATSU_PORT=28473
 ```
 
-The proxy CIDR above is an example, not a safe default. Set the exact observed address of your own TLS proxy. Bind the application privately; the example Compose publishes only on loopback. The reverse proxy must terminate TLS, forward WebSocket upgrades and overwrite `X-Forwarded-Proto` and `X-Forwarded-For` rather than append untrusted client values. Never log `/script/*` paths, authorization headers, API bodies or terminal data. Disable proxy caching for all API and script paths.
+The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and stores SQLite in the persistent `data` volume.
 
-The server requires HTTPS outside `KOTATSU_DEV=1`, either directly observed TLS or HTTPS asserted by an explicitly trusted proxy. The unauthenticated `/healthz` liveness check is the only cleartext exception. It returns no account data.
+| Variable | Purpose |
+| --- | --- |
+| `KOTATSU_PUBLIC_URL` | Canonical HTTPS origin; defaults to `https://localhost`. |
+| `KOTATSU_LISTEN` | Server bind address; defaults to `127.0.0.1:8080` outside Compose. |
+| `KOTATSU_DB` | SQLite path; defaults to `data/kotatsu.db`. |
+| `KOTATSU_TRUSTED_PROXIES` | Comma-separated trusted forwarding CIDRs; empty by default. |
+| `KOTATSU_RELEASE_VERSION` | Pinned agent release tag. |
+| `KOTATSU_RELEASE_URL` | HTTPS origin serving pinned release artifacts. |
+| `KOTATSU_RELEASE_DIR` | Optional local directory for allowlisted release files. |
+| `KOTATSU_PORT` | Compose loopback host port; defaults to `28473`. |
+| `KOTATSU_DEV` | Set to `1` for explicit development-only HTTP. |
 
-SQLite lives in the persistent `data` volume with WAL and foreign keys. The server is one instance; do not run multiple replicas against one database or assume relays survive a server restart. Stop the server before taking a filesystem backup, or use SQLite's online backup facilities. Keep backups private. On restart, unfinished audit records are marked ended; agents reconnect, but interactive sessions do not resume.
+Your reverse proxy must terminate TLS, forward WebSocket upgrades and overwrite forwarding headers rather than append untrusted client values. Disable caching for API and installer paths. Never log `/script/*` paths, authorization headers, request bodies or terminal data.
 
-Additional settings are `KOTATSU_LISTEN`, `KOTATSU_DB` and `KOTATSU_RELEASE_DIR`. The service account can write only its home/state directory and temporary files under the hardened unit. It cannot access your protected home or sudo.
+HTTPS is required outside development, either directly or asserted by an explicitly trusted proxy. The unauthenticated `/healthz` liveness endpoint is the only cleartext exception and exposes no account data. Registration is open but rate-limited; add access controls at your private TLS edge if public registration is unwanted.
 
-Registration is open but rate-limited. Put access controls at your private TLS edge if the server must not accept registrations from the public Internet.
+## Architecture and security
 
-## Commands and API
+One Go module contains `cmd/server`, `cmd/kotatsu` and `cmd/agent`. The server embeds the HTML/JavaScript UI and uses SQLite with WAL and foreign keys. Versioned REST endpoints under `/api/v1` handle accounts, credentials, enrollment, inventory and revocation; authenticated WebSockets carry agent control and terminal sessions.
 
-Run `kotatsu --help`, `kotatsu auth --help` and `kotatsu enrollment --help` for the complete command set. Account tokens support create, list, revoke and atomic rotate. Install tokens default to one use and 15 minutes, with explicit reusable tokens capped at 24 hours.
+Account API tokens, enrollment tokens and machine credentials are distinct random bearer tokens. Only hashes are stored. Ownership checks protect machine and session operations; seven-digit display IDs are convenience identifiers, not secrets. Enrollment defaults to one use and 15 minutes, with explicit reusable tokens capped at 24 hours.
 
-The API prefix is `/api/v1`. Routes cover `accounts`, `me`, `tokens`, `enrollment-tokens`, `machines`, `machines/enroll`, `agent/heartbeat`, `agent/connect` and `machines/{seven-digit-id}/connect`. Tokens are typed random bearer credentials; only hashes are stored. Internal records use UUIDs; seven-digit machine IDs are convenience identifiers, not secrets. All inventory and session operations check account ownership.
+Agents reconnect with bounded exponential backoff and jitter. Heartbeats run every 30 seconds; machines appear offline after 90 seconds. Sessions allow four concurrent shells per machine and expire after one hour or ten idle minutes. Revocation closes affected connections. Audit records retain IDs, timestamps and end reasons, not terminal transcripts.
 
-Sessions permit four concurrent shells per machine, expire after one hour or ten idle minutes, recheck the initiating token during use, and store only session/account/machine IDs, timestamps and an end reason. No terminal transcript is retained. The server is a trusted relay and can see live terminal bytes; this is transport TLS, not end-to-end encryption. Do not execute untrusted commands or deploy agents on machines you do not administer.
+The hardened agent unit restricts writes to its state/home directory and temporary files, with no sudo or access to protected home directories. A shared service user is not isolation for hostile multi-tenant workloads. Install agents only on machines you administer.
+
+Run a single server instance. A restart reconnects agents but does not resume interactive sessions. For backups, stop the server before copying SQLite files or use SQLite's online backup facilities. Keep backups private.
 
 ## Build and validation
 
@@ -88,6 +147,9 @@ VERSION=v0.1.0 ./scripts/release.sh
 (cd dist && sha256sum -c SHA256SUMS)
 ```
 
-The release script builds standalone CGO-free CLI archives for Linux amd64/arm64, macOS arm64, and Windows amd64/arm64, plus Linux amd64/arm64 agents. Artifacts include version metadata and deterministic archive headers. Tagged CI runs tests and publishes the archives and SHA256SUMS; ordinary push/PR CI runs race tests, vet, cross-builds and a Docker build. No GitHub repository or remote is created by this source tree.
+`make check` runs race tests, executable builds and vet. The release script cross-compiles five CGO-free CLI targets and two Linux agent targets, embeds version metadata and writes checksums with deterministic archive headers. Push/PR CI runs these checks and a Docker build; tagged CI publishes release archives.
 
-See [PROGRESS.md](PROGRESS.md) for the validation receipt and known environment limits, and [PLAN.md](PLAN.md) for the original scope.
+> [!NOTE]
+> Linux PTY, reconnect, revocation, terminal restoration and installer harness tests pass in the development sandbox. Installer account/systemd actions are redirected or stubbed in that harness. Real Docker deployment and real systemd service runtime have not been tested here. Cross-compilation is not runtime validation on macOS, Windows or Linux arm64.
+
+See [PROGRESS.md](PROGRESS.md) for implementation and validation details, and [PLAN.md](PLAN.md) for the original scope.
