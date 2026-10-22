@@ -11,7 +11,7 @@ import (
 
 func rejectInserts(t *testing.T, s *Store, name string) {
 	t.Helper()
-	err := s.db.RunCommand(context.Background(), bson.M{"collMod": name, "validator": bson.M{"reject_test": bson.M{"$exists": true}}, "validationLevel": "strict"}).Err()
+	err := s.db.RunCommand(context.Background(), bson.D{{Key: "collMod", Value: name}, {Key: "validator", Value: bson.M{"reject_test": bson.M{"$exists": true}}}, {Key: "validationLevel", Value: "strict"}}).Err()
 	if err != nil {
 		t.Fatal(err)
 	}
