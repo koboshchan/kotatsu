@@ -6,6 +6,7 @@ import (
 	"github.com/koboshchan/kotatsu/internal/config"
 	"github.com/koboshchan/kotatsu/internal/server"
 	"github.com/koboshchan/kotatsu/internal/store"
+	"github.com/koboshchan/kotatsu/internal/store/storetest"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestCLIAccountAndInventory(t *testing.T) {
-	db, e := store.Open(":memory:")
+	db, e := storetest.Open(t), error(nil)
 	if e != nil {
 		t.Fatal(e)
 	}

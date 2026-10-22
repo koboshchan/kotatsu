@@ -13,7 +13,7 @@ Self-hosted machine inventory and remote terminals. Linux agents connect outboun
 - Interactive Linux PTYs with resizing, exit codes and automatic agent reconnection.
 - Separate account, enrollment and machine credentials with expiry and revocation.
 - Short-lived installers with pinned, checksummed Linux agent downloads.
-- SQLite storage, Docker Compose configuration and hardened systemd agent units.
+- MongoDB storage, Docker Compose configuration and hardened systemd agent units.
 - Standalone CLI builds for Linux amd64/arm64, macOS arm64 and Windows amd64/arm64.
 
 ## Installation and quick start
@@ -111,13 +111,15 @@ KOTATSU_RELEASE_URL=https://releases.example.com
 KOTATSU_PORT=28473
 ```
 
-The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and stores SQLite in the persistent `data` volume.
+The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and runs MongoDB 7 without authentication and without published ports; only containers on the Compose network can reach it by the service name `mongo`, and its data lives in the persistent `mongo-data` volume. Never publish the MongoDB port.
 
 | Variable | Purpose |
 | --- | --- |
 | `KOTATSU_PUBLIC_URL` | Canonical HTTPS origin; defaults to `https://localhost`. |
 | `KOTATSU_LISTEN` | Server bind address; defaults to `127.0.0.1:8080` outside Compose. |
-| `KOTATSU_DB` | SQLite path; defaults to `data/kotatsu.db`. |
+| `KOTATSU_MONGO_URI` | MongoDB connection string, required (Compose uses `mongodb://mongo:27017`). |
+| `KOTATSU_MONGO_DB` | MongoDB database name; defaults to `kotatsu`. |
+| `KOTATSU_TEST_MONGO_URI` | Tests only: disposable MongoDB; each test uses and drops a unique database. Tests are skipped when unset. |
 | `KOTATSU_TRUSTED_PROXIES` | Comma-separated trusted forwarding CIDRs; empty by default. |
 | `KOTATSU_RELEASE_VERSION` | Pinned agent release tag. |
 | `KOTATSU_RELEASE_URL` | HTTPS origin serving pinned release artifacts. |
@@ -131,7 +133,7 @@ HTTPS is required outside development, either directly or asserted by an explici
 
 ## Architecture and security
 
-One Go module contains `cmd/server`, `cmd/kotatsu` and `cmd/agent`. The server embeds the HTML/JavaScript UI and uses SQLite with WAL and foreign keys. Versioned REST endpoints under `/api/v1` handle accounts, credentials, enrollment, inventory and revocation; authenticated WebSockets carry agent control and terminal sessions.
+One Go module contains `cmd/server`, `cmd/kotatsu` and `cmd/agent`. The server embeds the HTML/JavaScript UI and stores state in MongoDB with unique indexes for names, token hashes and machine IDs. Versioned REST endpoints under `/api/v1` handle accounts, credentials, enrollment, inventory and revocation; authenticated WebSockets carry agent control and terminal sessions.
 
 Account API tokens, enrollment tokens and machine credentials are distinct random bearer tokens. Only hashes are stored. Ownership checks protect machine and session operations; seven-digit display IDs are convenience identifiers, not secrets. Enrollment defaults to one use and 15 minutes, with explicit reusable tokens capped at 24 hours.
 
@@ -139,7 +141,7 @@ Agents reconnect with bounded exponential backoff and jitter. Heartbeats run eve
 
 The hardened agent unit restricts writes to its state/home directory and temporary files, with no sudo or access to protected home directories. A shared service user is not isolation for hostile multi-tenant workloads. Install agents only on machines you administer.
 
-Run a single server instance. A restart reconnects agents but does not resume interactive sessions. For backups, stop the server before copying SQLite files or use SQLite's online backup facilities. Keep backups private.
+Run a single server instance. A restart reconnects agents but does not resume interactive sessions. For backups, use mongodump against the private Compose network (for example docker compose exec mongo mongodump --archive > backup.archive). Keep backups private.
 
 ## Build and validation
 

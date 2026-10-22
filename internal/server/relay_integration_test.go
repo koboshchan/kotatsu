@@ -16,6 +16,7 @@ import (
 	"github.com/koboshchan/kotatsu/internal/relay"
 	"github.com/koboshchan/kotatsu/internal/server"
 	"github.com/koboshchan/kotatsu/internal/store"
+	"github.com/koboshchan/kotatsu/internal/store/storetest"
 	"golang.org/x/term"
 	"net/http/httptest"
 	"os"
@@ -42,7 +43,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, e := store.Open(filepath.Join(t.TempDir(), "db"))
+	db, e := storetest.Open(t), error(nil)
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/koboshchan/kotatsu/internal/store"
+	"github.com/koboshchan/kotatsu/internal/store/storetest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +10,7 @@ import (
 
 func testServer(t *testing.T) *Server {
 	t.Helper()
-	db, e := store.Open(":memory:")
+	db, e := storetest.Open(t), error(nil)
 	if e != nil {
 		t.Fatal(e)
 	}

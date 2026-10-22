@@ -45,7 +45,7 @@ func run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(log)
 	dev := os.Getenv("KOTATSU_DEV") == "1"
-	db, err := store.Open(config.Env("KOTATSU_DB", "data/kotatsu.db"))
+	db, err := store.Open(os.Getenv("KOTATSU_MONGO_URI"), config.Env("KOTATSU_MONGO_DB", "kotatsu"))
 	if err != nil {
 		return err
 	}

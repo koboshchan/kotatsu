@@ -3,16 +3,15 @@ package store
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/koboshchan/kotatsu/internal/api"
 	"github.com/koboshchan/kotatsu/internal/auth"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
-	_ "modernc.org/sqlite"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -24,76 +23,70 @@ type Identity struct {
 	Account api.Account
 	TokenID string
 }
+
+// Store keeps all state in MongoDB. The documented deployment is a private
+// Docker network MongoDB without authentication and without published ports.
 type Store struct {
-	db           *sql.DB
+	client       *mongo.Client
+	db           *mongo.Database
 	Now          func() time.Time
 	NewDisplayID func() (string, error)
 }
 
-const migration = `
-CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 80), created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS account_tokens(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES accounts(id), hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)));
-CREATE INDEX IF NOT EXISTS account_tokens_owner ON account_tokens(owner_id);
-CREATE TABLE IF NOT EXISTS enrollment_tokens(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES accounts(id), hash TEXT NOT NULL UNIQUE, reusable INTEGER NOT NULL CHECK(reusable IN (0,1)), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), used INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS machines(id TEXT PRIMARY KEY, display_id TEXT NOT NULL UNIQUE CHECK(length(display_id)=7 AND display_id NOT GLOB '*[^0-9]*'), owner_id TEXT NOT NULL REFERENCES accounts(id), name TEXT NOT NULL, platform TEXT NOT NULL, public_ip TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, credential_hash TEXT NOT NULL UNIQUE);
-CREATE INDEX IF NOT EXISTS machines_owner ON machines(owner_id);
-CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES accounts(id), machine_id TEXT NOT NULL REFERENCES machines(id), started_at INTEGER NOT NULL, ended_at INTEGER, reason TEXT);
-INSERT OR IGNORE INTO schema_version(version) VALUES(1);
-`
+const dbTimeout = 10 * time.Second
 
-func Open(path string) (*Store, error) {
-	if path != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return nil, err
-		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
-		if err != nil {
-			return nil, err
-		}
-		f.Close()
-		if err = os.Chmod(path, 0600); err != nil {
-			return nil, err
-		}
+func (s *Store) c(name string) *mongo.Collection { return s.db.Collection(name) }
+
+func Open(uri, database string) (*Store, error) {
+	if uri == "" || database == "" {
+		return nil, errors.New("MongoDB URI and database name are required")
 	}
-	db, err := sql.Open("sqlite", path)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(20 * time.Second))
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	s := &Store{db: db, Now: time.Now, NewDisplayID: randomDisplayID}
-	for _, q := range []string{"PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000", "PRAGMA journal_mode=WAL", migration} {
-		if _, err = db.Exec(q); err != nil {
-			db.Close()
-			return nil, err
-		}
-	}
-	// Version two adds permanent owner-triggered machine credential revocation.
-	var hasRevocation int
-	if err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('machines') WHERE name='revoked'").Scan(&hasRevocation); err != nil {
-		db.Close()
+	s := &Store{client: client, db: client.Database(database), Now: time.Now, NewDisplayID: randomDisplayID}
+	if err = client.Ping(ctx, nil); err != nil {
+		client.Disconnect(context.Background())
 		return nil, err
 	}
-	if hasRevocation == 0 {
-		if _, err = db.Exec("ALTER TABLE machines ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1))"); err != nil {
-			db.Close()
+	unique := func(coll string, keys bson.D) mongo.IndexModel {
+		return mongo.IndexModel{Keys: keys, Options: options.Index().SetUnique(true)}
+	}
+	plain := func(keys bson.D) mongo.IndexModel { return mongo.IndexModel{Keys: keys} }
+	indexes := map[string][]mongo.IndexModel{
+		"accounts":          {unique("accounts", bson.D{{Key: "name", Value: 1}})},
+		"account_tokens":    {unique("", bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"enrollment_tokens": {unique("", bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"machines":          {unique("", bson.D{{Key: "display_id", Value: 1}}), unique("", bson.D{{Key: "credential_hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"sessions":          {plain(bson.D{{Key: "ended_at", Value: 1}})},
+	}
+	for name, models := range indexes {
+		if _, err = s.c(name).Indexes().CreateMany(ctx, models); err != nil {
+			client.Disconnect(context.Background())
 			return nil, err
 		}
-	}
-	if _, err = db.Exec("INSERT OR IGNORE INTO schema_version(version) VALUES(2)"); err != nil {
-		db.Close()
-		return nil, err
 	}
 	// Relays are deliberately transient; after a restart no historical session
 	// remains marked active.
-	_, err = db.Exec("UPDATE sessions SET ended_at=?, reason='server_restart' WHERE ended_at IS NULL", s.Now().Unix())
+	_, err = s.c("sessions").UpdateMany(ctx, bson.M{"ended_at": nil}, bson.M{"$set": bson.M{"ended_at": s.Now().Unix(), "reason": "server_restart"}})
 	if err != nil {
-		db.Close()
+		client.Disconnect(context.Background())
 		return nil, err
 	}
 	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	return s.client.Disconnect(ctx)
+}
+
+// DropDatabase is only for tests that own a unique database.
+func (s *Store) DropDatabase(ctx context.Context) error { return s.db.Drop(ctx) }
+
 func randomDisplayID() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(9000000))
 	if err != nil {
@@ -112,47 +105,64 @@ func (s *Store) Register(ctx context.Context, name string) (api.Registration, er
 	}
 	out.Account = api.Account{ID: uuid.NewString(), Name: name}
 	out.Token = api.Token{ID: uuid.NewString(), Token: raw, CreatedAt: s.Now().UTC()}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return out, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, "INSERT INTO accounts VALUES(?,?,?)", out.Account.ID, name, s.Now().Unix())
-	if err != nil {
-		return api.Registration{}, ErrConflict
-	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO account_tokens(id,owner_id,hash,created_at) VALUES(?,?,?,?)", out.Token.ID, out.Account.ID, auth.Hash(raw), out.Token.CreatedAt.Unix())
-	if err != nil {
+	if _, err = s.c("accounts").InsertOne(ctx, bson.M{"_id": out.Account.ID, "name": name, "created_at": s.Now().Unix()}); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return api.Registration{}, ErrConflict
+		}
 		return api.Registration{}, err
 	}
-	err = tx.Commit()
-	return out, err
+	_, err = s.c("account_tokens").InsertOne(ctx, bson.M{"_id": out.Token.ID, "owner_id": out.Account.ID, "hash": auth.Hash(raw), "created_at": out.Token.CreatedAt.Unix(), "revoked": false})
+	if err != nil {
+		// No transactions on a standalone MongoDB: undo the account so the name is not lost.
+		s.c("accounts").DeleteOne(context.WithoutCancel(ctx), bson.M{"_id": out.Account.ID})
+		return api.Registration{}, err
+	}
+	return out, nil
 }
 func (s *Store) Authenticate(ctx context.Context, token string) (Identity, error) {
 	var i Identity
-	err := s.db.QueryRowContext(ctx, "SELECT a.id,a.name,t.id FROM account_tokens t JOIN accounts a ON a.id=t.owner_id WHERE t.hash=? AND t.revoked=0", auth.Hash(token)).Scan(&i.Account.ID, &i.Account.Name, &i.TokenID)
-	if errors.Is(err, sql.ErrNoRows) {
+	var t struct {
+		ID    string `bson:"_id"`
+		Owner string `bson:"owner_id"`
+	}
+	err := s.c("account_tokens").FindOne(ctx, bson.M{"hash": auth.Hash(token), "revoked": false}).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
 		return i, ErrUnauthorized
 	}
-	return i, err
+	if err != nil {
+		return i, err
+	}
+	var a struct {
+		Name string `bson:"name"`
+	}
+	err = s.c("accounts").FindOne(ctx, bson.M{"_id": t.Owner}).Decode(&a)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return i, ErrUnauthorized
+	}
+	if err != nil {
+		return i, err
+	}
+	i.Account = api.Account{ID: t.Owner, Name: a.Name}
+	i.TokenID = t.ID
+	return i, nil
 }
 func (s *Store) Tokens(ctx context.Context, owner string) ([]api.Token, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,created_at FROM account_tokens WHERE owner_id=? AND revoked=0 ORDER BY created_at,id", owner)
+	cur, err := s.c("account_tokens").Find(ctx, bson.M{"owner_id": owner, "revoked": false}, options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}, {Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []api.Token{}
-	for rows.Next() {
-		var t api.Token
-		var n int64
-		if err = rows.Scan(&t.ID, &n); err != nil {
-			return nil, err
-		}
-		t.CreatedAt = time.Unix(n, 0).UTC()
-		out = append(out, t)
+	var docs []struct {
+		ID      string `bson:"_id"`
+		Created int64  `bson:"created_at"`
 	}
-	return out, rows.Err()
+	if err = cur.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	out := []api.Token{}
+	for _, d := range docs {
+		out = append(out, api.Token{ID: d.ID, CreatedAt: time.Unix(d.Created, 0).UTC()})
+	}
+	return out, nil
 }
 func (s *Store) IssueToken(ctx context.Context, owner, rotateID string) (api.Token, error) {
 	raw, err := auth.New("as")
@@ -160,35 +170,27 @@ func (s *Store) IssueToken(ctx context.Context, owner, rotateID string) (api.Tok
 		return api.Token{}, err
 	}
 	out := api.Token{ID: uuid.NewString(), Token: raw, CreatedAt: s.Now().UTC()}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return api.Token{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, "INSERT INTO account_tokens(id,owner_id,hash,created_at) VALUES(?,?,?,?)", out.ID, owner, auth.Hash(raw), out.CreatedAt.Unix())
-	if err != nil {
-		return api.Token{}, err
-	}
 	if rotateID != "" {
-		r, e := tx.ExecContext(ctx, "UPDATE account_tokens SET revoked=1 WHERE owner_id=? AND id=? AND revoked=0", owner, rotateID)
-		if e != nil {
-			return api.Token{}, e
-		}
-		n, _ := r.RowsAffected()
-		if n != 1 {
-			return api.Token{}, ErrNotFound
+		// Revoke atomically first so only one concurrent rotation can win.
+		if err = s.RevokeToken(ctx, owner, rotateID); err != nil {
+			return api.Token{}, err
 		}
 	}
-	err = tx.Commit()
-	return out, err
+	_, err = s.c("account_tokens").InsertOne(ctx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "created_at": out.CreatedAt.Unix(), "revoked": false})
+	if err != nil {
+		if rotateID != "" {
+			s.c("account_tokens").UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": rotateID, "owner_id": owner}, bson.M{"$set": bson.M{"revoked": false}})
+		}
+		return api.Token{}, err
+	}
+	return out, nil
 }
 func (s *Store) RevokeToken(ctx context.Context, owner, id string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE account_tokens SET revoked=1 WHERE owner_id=? AND id=? AND revoked=0", owner, id)
+	r, err := s.c("account_tokens").UpdateOne(ctx, bson.M{"owner_id": owner, "_id": id, "revoked": false}, bson.M{"$set": bson.M{"revoked": true}})
 	if err != nil {
 		return err
 	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
+	if r.ModifiedCount != 1 {
 		return ErrNotFound
 	}
 	return nil

@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/koboshchan/kotatsu/internal/api"
 	"github.com/koboshchan/kotatsu/internal/auth"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"time"
 )
 
@@ -20,42 +22,46 @@ func (s *Store) CreateEnrollment(ctx context.Context, owner string, reusable boo
 		return api.Enrollment{}, err
 	}
 	out := api.Enrollment{ID: uuid.NewString(), Token: raw, Reusable: reusable, ExpiresAt: s.Now().Add(ttl).UTC()}
-	_, err = s.db.ExecContext(ctx, "INSERT INTO enrollment_tokens(id,owner_id,hash,reusable,expires_at) VALUES(?,?,?,?,?)", out.ID, owner, auth.Hash(raw), reusable, out.ExpiresAt.Unix())
+	_, err = s.c("enrollment_tokens").InsertOne(ctx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "reusable": reusable, "expires_at": out.ExpiresAt.Unix(), "revoked": false, "used": 0})
 	return out, err
 }
 func (s *Store) Enrollments(ctx context.Context, owner string) ([]api.Enrollment, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,reusable,expires_at,used,revoked FROM enrollment_tokens WHERE owner_id=? ORDER BY expires_at DESC", owner)
+	cur, err := s.c("enrollment_tokens").Find(ctx, bson.M{"owner_id": owner}, options.Find().SetSort(bson.D{{Key: "expires_at", Value: -1}, {Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []api.Enrollment{}
-	for rows.Next() {
-		var e api.Enrollment
-		var expires int64
-		if err = rows.Scan(&e.ID, &e.Reusable, &expires, &e.Used, &e.Revoked); err != nil {
-			return nil, err
-		}
-		e.ExpiresAt = time.Unix(expires, 0).UTC()
-		out = append(out, e)
+	var docs []struct {
+		ID       string `bson:"_id"`
+		Reusable bool   `bson:"reusable"`
+		Expires  int64  `bson:"expires_at"`
+		Used     int    `bson:"used"`
+		Revoked  bool   `bson:"revoked"`
 	}
-	return out, rows.Err()
+	if err = cur.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	out := []api.Enrollment{}
+	for _, d := range docs {
+		out = append(out, api.Enrollment{ID: d.ID, Reusable: d.Reusable, ExpiresAt: time.Unix(d.Expires, 0).UTC(), Used: d.Used, Revoked: d.Revoked})
+	}
+	return out, nil
 }
 func (s *Store) RevokeEnrollment(ctx context.Context, owner, id string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE enrollment_tokens SET revoked=1 WHERE owner_id=? AND id=?", owner, id)
+	r, err := s.c("enrollment_tokens").UpdateOne(ctx, bson.M{"owner_id": owner, "_id": id}, bson.M{"$set": bson.M{"revoked": true}})
 	if err != nil {
 		return err
 	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
+	if r.MatchedCount != 1 {
 		return ErrNotFound
 	}
 	return nil
 }
+func (s *Store) enrollmentFilter(token string) bson.M {
+	return bson.M{"hash": auth.Hash(token), "revoked": false, "expires_at": bson.M{"$gt": s.Now().Unix()}, "$or": bson.A{bson.M{"reusable": true}, bson.M{"used": 0}}}
+}
 func (s *Store) EnrollmentValid(ctx context.Context, token string) error {
-	var id string
-	err := s.db.QueryRowContext(ctx, "SELECT id FROM enrollment_tokens WHERE hash=? AND revoked=0 AND expires_at>? AND (reusable=1 OR used=0)", auth.Hash(token), s.Now().Unix()).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := s.c("enrollment_tokens").FindOne(ctx, s.enrollmentFilter(token)).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
 		return ErrUnauthorized
 	}
 	return err
@@ -69,112 +75,111 @@ func (s *Store) Enroll(ctx context.Context, in api.EnrollRequest, ip string) (ap
 	if err != nil {
 		return out, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return out, err
+	// Atomically consume one use; concurrent single-use enrollments cannot both win.
+	var tok struct {
+		ID    string `bson:"_id"`
+		Owner string `bson:"owner_id"`
 	}
-	defer tx.Rollback()
-	var owner, id string
-	err = tx.QueryRowContext(ctx, "SELECT owner_id,id FROM enrollment_tokens WHERE hash=? AND revoked=0 AND expires_at>? AND (reusable=1 OR used=0)", auth.Hash(in.Token), s.Now().Unix()).Scan(&owner, &id)
-	if errors.Is(err, sql.ErrNoRows) {
+	err = s.c("enrollment_tokens").FindOneAndUpdate(ctx, s.enrollmentFilter(in.Token), bson.M{"$inc": bson.M{"used": 1}}).Decode(&tok)
+	if errors.Is(err, mongo.ErrNoDocuments) {
 		return out, ErrUnauthorized
 	}
 	if err != nil {
 		return out, err
 	}
-	r, err := tx.ExecContext(ctx, "UPDATE enrollment_tokens SET used=used+1 WHERE id=? AND (reusable=1 OR used=0) AND revoked=0 AND expires_at>?", id, s.Now().Unix())
-	if err != nil {
-		return out, err
-	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
-		return out, ErrUnauthorized
+	release := func() {
+		s.c("enrollment_tokens").UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": tok.ID}, bson.M{"$inc": bson.M{"used": -1}})
 	}
 	m := api.Machine{ID: uuid.NewString(), Name: in.Name, Platform: in.Platform, PublicIP: ip, CreatedAt: s.Now().UTC(), LastSeen: s.Now().UTC(), Online: true}
 	for tries := 0; tries < 32; tries++ {
 		m.DisplayID, err = s.NewDisplayID()
 		if err != nil {
+			release()
 			return out, err
 		}
-		var exists int
-		err = tx.QueryRowContext(ctx, "SELECT 1 FROM machines WHERE display_id=?", m.DisplayID).Scan(&exists)
-		if err == nil {
+		_, err = s.c("machines").InsertOne(ctx, bson.M{"_id": m.ID, "display_id": m.DisplayID, "owner_id": tok.Owner, "name": m.Name, "platform": m.Platform, "public_ip": ip, "created_at": m.CreatedAt.Unix(), "last_seen": m.LastSeen.Unix(), "credential_hash": auth.Hash(credential), "revoked": false})
+		if mongo.IsDuplicateKeyError(err) {
 			continue
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return out, err
-		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO machines(id,display_id,owner_id,name,platform,public_ip,created_at,last_seen,credential_hash) VALUES(?,?,?,?,?,?,?,?,?)", m.ID, m.DisplayID, owner, m.Name, m.Platform, ip, m.CreatedAt.Unix(), m.LastSeen.Unix(), auth.Hash(credential))
 		if err != nil {
-			return out, err
-		}
-		if err = tx.Commit(); err != nil {
+			release()
 			return out, err
 		}
 		return api.Enrolled{Machine: m, Credential: credential}, nil
 	}
+	release()
 	return out, fmt.Errorf("machine ID allocation exhausted")
 }
-func scanMachine(row interface{ Scan(...any) error }, now time.Time) (api.Machine, error) {
-	var m api.Machine
-	var created, seen int64
-	err := row.Scan(&m.ID, &m.DisplayID, &m.Name, &m.Platform, &m.PublicIP, &created, &seen, &m.Revoked)
-	m.CreatedAt = time.Unix(created, 0).UTC()
-	m.LastSeen = time.Unix(seen, 0).UTC()
-	m.Online = !m.Revoked && now.Sub(m.LastSeen) < 90*time.Second
-	if errors.Is(err, sql.ErrNoRows) {
-		return m, ErrNotFound
-	}
-	return m, err
+
+type machineDoc struct {
+	ID        string `bson:"_id"`
+	DisplayID string `bson:"display_id"`
+	Name      string `bson:"name"`
+	Platform  string `bson:"platform"`
+	PublicIP  string `bson:"public_ip"`
+	Created   int64  `bson:"created_at"`
+	Seen      int64  `bson:"last_seen"`
+	Revoked   bool   `bson:"revoked"`
 }
 
-const machineColumns = "id,display_id,name,platform,public_ip,created_at,last_seen,revoked"
-
+func (d machineDoc) machine(now time.Time) api.Machine {
+	m := api.Machine{ID: d.ID, DisplayID: d.DisplayID, Name: d.Name, Platform: d.Platform, PublicIP: d.PublicIP, Revoked: d.Revoked, CreatedAt: time.Unix(d.Created, 0).UTC(), LastSeen: time.Unix(d.Seen, 0).UTC()}
+	m.Online = !m.Revoked && now.Sub(m.LastSeen) < 90*time.Second
+	return m
+}
+func (s *Store) oneMachine(ctx context.Context, filter bson.M) (api.Machine, error) {
+	var d machineDoc
+	err := s.c("machines").FindOne(ctx, filter).Decode(&d)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return api.Machine{}, ErrNotFound
+	}
+	if err != nil {
+		return api.Machine{}, err
+	}
+	return d.machine(s.Now()), nil
+}
 func (s *Store) Machines(ctx context.Context, owner string) ([]api.Machine, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE owner_id=? ORDER BY created_at,display_id", owner)
+	cur, err := s.c("machines").Find(ctx, bson.M{"owner_id": owner}, options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}, {Key: "display_id", Value: 1}}))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []api.Machine{}
-	for rows.Next() {
-		m, e := scanMachine(rows, s.Now())
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, m)
+	var docs []machineDoc
+	if err = cur.All(ctx, &docs); err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	out := []api.Machine{}
+	for _, d := range docs {
+		out = append(out, d.machine(s.Now()))
+	}
+	return out, nil
 }
 func (s *Store) OwnedMachine(ctx context.Context, owner, displayID string) (api.Machine, error) {
-	return scanMachine(s.db.QueryRowContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE owner_id=? AND display_id=?", owner, displayID), s.Now())
+	return s.oneMachine(ctx, bson.M{"owner_id": owner, "display_id": displayID})
 }
 func (s *Store) MachineAuth(ctx context.Context, credential string) (api.Machine, error) {
-	m, err := scanMachine(s.db.QueryRowContext(ctx, "SELECT "+machineColumns+" FROM machines WHERE credential_hash=? AND revoked=0", auth.Hash(credential)), s.Now())
+	m, err := s.oneMachine(ctx, bson.M{"credential_hash": auth.Hash(credential), "revoked": false})
 	if errors.Is(err, ErrNotFound) {
 		return m, ErrUnauthorized
 	}
 	return m, err
 }
 func (s *Store) Heartbeat(ctx context.Context, machineID, ip string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE machines SET last_seen=?,public_ip=? WHERE id=? AND revoked=0", s.Now().Unix(), ip, machineID)
+	r, err := s.c("machines").UpdateOne(ctx, bson.M{"_id": machineID, "revoked": false}, bson.M{"$set": bson.M{"last_seen": s.Now().Unix(), "public_ip": ip}})
 	if err != nil {
 		return err
 	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
+	if r.MatchedCount != 1 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (s *Store) RevokeMachine(ctx context.Context, owner, displayID string) error {
-	r, err := s.db.ExecContext(ctx, "UPDATE machines SET revoked=1 WHERE owner_id=? AND display_id=?", owner, displayID)
+	r, err := s.c("machines").UpdateOne(ctx, bson.M{"owner_id": owner, "display_id": displayID}, bson.M{"$set": bson.M{"revoked": true}})
 	if err != nil {
 		return err
 	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
+	if r.MatchedCount != 1 {
 		return ErrNotFound
 	}
 	return nil

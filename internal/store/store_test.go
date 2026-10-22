@@ -2,20 +2,42 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"github.com/koboshchan/kotatsu/internal/auth"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func testURI(t *testing.T) string {
+	t.Helper()
+	u := os.Getenv("KOTATSU_TEST_MONGO_URI")
+	if u == "" {
+		t.Skip("set KOTATSU_TEST_MONGO_URI to a disposable MongoDB")
+	}
+	return u
+}
+func testDB() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "kotatsu_test_" + hex.EncodeToString(b)
+}
 
 func setup(t *testing.T) *Store {
 	t.Helper()
-	s, e := Open(filepath.Join(t.TempDir(), "test.db"))
+	s, e := Open(testURI(t), testDB())
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s.DropDatabase(ctx)
+		s.Close()
+	})
 	return s
 }
 func TestTokenLifecycle(t *testing.T) {
@@ -52,15 +74,18 @@ func TestTokenLifecycle(t *testing.T) {
 	if _, e = s.Authenticate(ctx, next.Token); e != ErrUnauthorized {
 		t.Fatal(e)
 	}
-	rows, e := s.db.Query("SELECT hash FROM account_tokens")
+	cur, e := s.c("account_tokens").Find(ctx, bson.M{})
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var hash string
-		rows.Scan(&hash)
-		if len(hash) != 64 || strings.HasPrefix(hash, "as_") {
+	var docs []struct {
+		Hash string `bson:"hash"`
+	}
+	if e = cur.All(ctx, &docs); e != nil || len(docs) != 2 {
+		t.Fatal(e, len(docs))
+	}
+	for _, d := range docs {
+		if len(d.Hash) != 64 || strings.HasPrefix(d.Hash, "as_") {
 			t.Fatal("plaintext credential")
 		}
 	}
@@ -76,23 +101,19 @@ func TestHash(t *testing.T) {
 	}
 }
 func TestReopen(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "db")
-	s, e := Open(p)
+	uri, name := testURI(t), testDB()
+	s, e := Open(uri, name)
 	if e != nil {
 		t.Fatal(e)
 	}
 	a, _ := s.Register(context.Background(), "persistent")
 	s.Close()
-	s, e = Open(p)
+	s, e = Open(uri, name)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func() { s.DropDatabase(context.Background()); s.Close() }()
 	if _, e = s.Authenticate(context.Background(), a.Token.Token); e != nil {
 		t.Fatal(e)
-	}
-	st, _ := os.Stat(p)
-	if st.Mode().Perm() != 0600 {
-		t.Fatal(st.Mode())
 	}
 }
