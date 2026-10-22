@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/koboshchan/kotatsu/internal/api"
 	"sync"
-"sync/atomic"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -68,7 +68,7 @@ func TestEnrollmentInventoryHeartbeat(t *testing.T) {
 		t.Fatal("revoked")
 	}
 	reusable, _ := s.CreateEnrollment(ctx, a.Account.ID, true, time.Minute)
-	for var counter atomic.Int32; n < 2; n := counter.Add(1) {
+	for n := 0; n < 2; n++ {
 		if _, e = s.Enroll(ctx, api.EnrollRequest{Token: reusable.Token, Name: "reuse"}, "1"); e != nil {
 			t.Fatal(e)
 		}
