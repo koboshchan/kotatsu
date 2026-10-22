@@ -7,7 +7,7 @@ import (
 	"regexp"
 )
 
-var releaseFile = regexp.MustCompile(`^(anyshell(-agent)?_v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?_(linux|darwin|windows)_(amd64|arm64)\.tar\.gz|SHA256SUMS|version\.json)$`)
+var releaseFile = regexp.MustCompile(`^(kotatsu(-agent)?_v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?_(linux|darwin|windows)_(amd64|arm64)\.tar\.gz|SHA256SUMS|version\.json)$`)
 
 func (s *Server) releaseRoutes() {
 	s.mux.HandleFunc("GET /releases/{version}/{file}", func(w http.ResponseWriter, r *http.Request) {

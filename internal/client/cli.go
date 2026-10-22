@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/config"
-	"github.com/koboshchan/anyshell/internal/version"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/config"
+	"github.com/koboshchan/kotatsu/internal/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"io"
@@ -20,7 +20,7 @@ import (
 func NewCommand() *cobra.Command {
 	var path, server string
 	var dev bool
-	root := &cobra.Command{Use: "anyshell", Short: "Manage your machines and open remote PTYs", Version: version.Version, SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "kotatsu", Short: "Manage your machines and open remote PTYs", Version: version.Version, SilenceUsage: true, SilenceErrors: true}
 	defaultPath, _ := config.ClientPath()
 	root.PersistentFlags().StringVar(&path, "config", defaultPath, "private config file")
 	root.PersistentFlags().StringVar(&server, "server", "", "server origin")
@@ -38,7 +38,7 @@ func NewCommand() *cobra.Command {
 			cfg.Dev = true
 		}
 		if cfg.Server == "" {
-			return cfg, errors.New("set --server to your AnyShell origin")
+			return cfg, errors.New("set --server to your Kotatsu origin")
 		}
 		return cfg, config.ValidateURL(cfg.Server, cfg.Dev)
 	}
@@ -48,7 +48,7 @@ func NewCommand() *cobra.Command {
 			return nil, err
 		}
 		if cfg.Token == "" {
-			return nil, errors.New("run anyshell auth login first")
+			return nil, errors.New("run kotatsu auth login first")
 		}
 		return New(cfg.Server, cfg.Token, cfg.Dev)
 	}

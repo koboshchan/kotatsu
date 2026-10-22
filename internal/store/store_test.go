@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	"github.com/koboshchan/anyshell/internal/auth"
+	"github.com/koboshchan/kotatsu/internal/auth"
 	"os"
 	"path/filepath"
 	"strings"

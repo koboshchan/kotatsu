@@ -1,4 +1,4 @@
-module github.com/koboshchan/anyshell
+module github.com/koboshchan/kotatsu
 
 go 1.27.2
 

@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
-	"github.com/koboshchan/anyshell/internal/agent"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/client"
-	"github.com/koboshchan/anyshell/internal/config"
-	"github.com/koboshchan/anyshell/internal/relay"
-	"github.com/koboshchan/anyshell/internal/server"
-	"github.com/koboshchan/anyshell/internal/store"
+	"github.com/koboshchan/kotatsu/internal/agent"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/client"
+	"github.com/koboshchan/kotatsu/internal/config"
+	"github.com/koboshchan/kotatsu/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/server"
+	"github.com/koboshchan/kotatsu/internal/store"
 	"golang.org/x/term"
 	"net/http/httptest"
 	"os"
@@ -356,8 +356,8 @@ func TestCLI_SIGTERMRestoresTerminal(t *testing.T) {
 	f := newFixture(t)
 	probe := f.dial(t, f.alice.Token.Token)
 	probe.CloseNow()
-	binary := filepath.Join(t.TempDir(), "anyshell")
-	build := exec.Command("go", "build", "-o", binary, "./cmd/anyshell")
+	binary := filepath.Join(t.TempDir(), "kotatsu")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/kotatsu")
 	build.Dir = "../.."
 	if b, e := build.CombinedOutput(); e != nil {
 		t.Fatal(e, string(b))

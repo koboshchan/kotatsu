@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"github.com/coder/websocket"
-	"github.com/koboshchan/anyshell/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/relay"
 	"os"
 )
 

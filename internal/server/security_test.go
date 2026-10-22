@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"github.com/koboshchan/anyshell/internal/api"
+	"github.com/koboshchan/kotatsu/internal/api"
 	"net/http/httptest"
 	"net/netip"
 	"os"

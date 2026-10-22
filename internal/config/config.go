@@ -29,7 +29,7 @@ func PrivateJSON(path string, value any) error {
 	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".anyshell-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".kotatsu-*")
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ type Client struct {
 
 func ClientPath() (string, error) {
 	dir, err := os.UserConfigDir()
-	return filepath.Join(dir, "anyshell", "config.json"), err
+	return filepath.Join(dir, "kotatsu", "config.json"), err
 }
 func Load(path string, out any) error {
 	b, err := os.ReadFile(path)

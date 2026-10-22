@@ -26,3 +26,17 @@ func TestPrivateJSON(t *testing.T) {
 		t.Fatal(s.Mode())
 	}
 }
+
+func TestClientPathUsesKotatsuDirectory(t *testing.T) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ClientPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "kotatsu", "config.json"); got != want {
+		t.Fatalf("ClientPath() = %q, want %q", got, want)
+	}
+}

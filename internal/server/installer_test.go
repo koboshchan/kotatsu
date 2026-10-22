@@ -5,10 +5,10 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/coder/websocket"
-	"github.com/koboshchan/anyshell/internal/agent"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/config"
-	"github.com/koboshchan/anyshell/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/agent"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/config"
+	"github.com/koboshchan/kotatsu/internal/relay"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +52,7 @@ func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 			// Curl flags are intentionally parsed rather than depending on their order.
 			write("curl", `url= out=
 while [ "$#" -gt 0 ]; do case "$1" in -o) shift; out=$1;; http*) url=$1;; esac; shift; done
-case "$url" in *SHA256SUMS) printf '0000000000000000000000000000000000000000000000000000000000000000  anyshell-agent_v0.1.0_linux_amd64.tar.gz\n0000000000000000000000000000000000000000000000000000000000000000000  anyshell-agent_v0.1.0_linux_arm64.tar.gz\n' > "$out";; *) echo corrupt > "$out";; esac`)
+case "$url" in *SHA256SUMS) printf '0000000000000000000000000000000000000000000000000000000000000000  kotatsu-agent_v0.1.0_linux_amd64.tar.gz\n0000000000000000000000000000000000000000000000000000000000000000000  kotatsu-agent_v0.1.0_linux_arm64.tar.gz\n' > "$out";; *) echo corrupt > "$out";; esac`)
 			command := exec.Command("/bin/sh")
 			command.Stdin = strings.NewReader(w.Body.String())
 			command.Env = append(os.Environ(), "PATH="+bin+":/usr/sbin:/usr/bin:/bin")
@@ -83,15 +83,15 @@ func TestInstallerRealAgentInIsolatedRoot(t *testing.T) {
 	s.Config.ReleaseVersion = "v0.1.0"
 	s.Config.ReleaseDir = filepath.Join(dir, "releases")
 	os.Mkdir(s.Config.ReleaseDir, 0700)
-	artifact := filepath.Join(s.Config.ReleaseDir, "anyshell-agent_v0.1.0_linux_amd64.tar.gz")
+	artifact := filepath.Join(s.Config.ReleaseDir, "kotatsu-agent_v0.1.0_linux_amd64.tar.gz")
 	stage := filepath.Join(dir, "stage")
 	os.Mkdir(stage, 0700)
-	command := exec.Command("go", "build", "-o", filepath.Join(stage, "anyshell-agent"), "./cmd/agent")
+	command := exec.Command("go", "build", "-o", filepath.Join(stage, "kotatsu-agent"), "./cmd/agent")
 	command.Dir = "../.."
 	if b, e := command.CombinedOutput(); e != nil {
 		t.Fatal(e, string(b))
 	}
-	command = exec.Command("tar", "-czf", artifact, "-C", stage, "anyshell-agent")
+	command = exec.Command("tar", "-czf", artifact, "-C", stage, "kotatsu-agent")
 	if b, e := command.CombinedOutput(); e != nil {
 		t.Fatal(e, string(b))
 	}
@@ -113,7 +113,7 @@ func TestInstallerRealAgentInIsolatedRoot(t *testing.T) {
 		t.Fatal(e, response.StatusCode)
 	}
 	script := string(body)
-	for _, path := range []string{"/var/lib/anyshell", "/usr/local/bin/anyshell-agent", "/etc/systemd/system"} {
+	for _, path := range []string{"/var/lib/kotatsu", "/usr/local/bin/kotatsu-agent", "/etc/systemd/system"} {
 		script = strings.ReplaceAll(script, path, root+path)
 	}
 	os.MkdirAll(root+"/usr/local/bin", 0700)
@@ -126,7 +126,7 @@ func TestInstallerRealAgentInIsolatedRoot(t *testing.T) {
 	write("uname", `if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi`)
 	write("id", "echo 0")
 	write("getent", "exit 0")
-	write("systemctl", `printf '%s\n' "$*" >> "$ANYSHELL_TEST_ROOT/systemctl.calls"`)
+	write("systemctl", `printf '%s\n' "$*" >> "$KOTATSU_TEST_ROOT/systemctl.calls"`)
 	write("runuser", `shift;shift;shift;exec "$@"`)
 	write("install", `# keep real install permissions, skip only account ownership
 args=
@@ -136,20 +136,20 @@ done
 eval "exec /usr/bin/install $args"`)
 	command = exec.Command("/bin/sh")
 	command.Stdin = strings.NewReader(script)
-	command.Env = append(os.Environ(), "PATH="+bin+":/usr/sbin:/usr/bin:/bin", "ANYSHELL_TEST_ROOT="+root)
+	command.Env = append(os.Environ(), "PATH="+bin+":/usr/sbin:/usr/bin:/bin", "KOTATSU_TEST_ROOT="+root)
 	out, e := command.CombinedOutput()
 	if e != nil {
 		t.Fatal(e, string(out))
 	}
 	var state agent.State
-	if e = config.Load(root+"/var/lib/anyshell/agent.json", &state); e != nil {
+	if e = config.Load(root+"/var/lib/kotatsu/agent.json", &state); e != nil {
 		t.Fatal(e)
 	}
 	machines, e := s.Store.Machines(context.Background(), a.Account.ID)
 	if e != nil || len(machines) != 1 || machines[0].ID != state.Machine.ID {
 		t.Fatal(machines, e)
 	}
-	unit, e := os.ReadFile(root + "/etc/systemd/system/anyshell-agent.service")
+	unit, e := os.ReadFile(root + "/etc/systemd/system/kotatsu-agent.service")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -157,17 +157,17 @@ eval "exec /usr/bin/install $args"`)
 		t.Fatal("unit hardening/secret")
 	}
 	calls, _ := os.ReadFile(root + "/systemctl.calls")
-	if !strings.Contains(string(calls), "enable --now anyshell-agent.service") {
+	if !strings.Contains(string(calls), "enable --now kotatsu-agent.service") {
 		t.Fatal(string(calls))
 	}
-	st, _ := os.Stat(root + "/var/lib/anyshell/agent.json")
+	st, _ := os.Stat(root + "/var/lib/kotatsu/agent.json")
 	if st.Mode().Perm() != 0600 {
 		t.Fatal(st.Mode())
 	}
 	// Start and stop the installed executable twice using its persisted credential,
 	// proving process restart does not create another inventory record.
 	for n := 0; n < 2; n++ {
-		run := exec.Command(root+"/usr/local/bin/anyshell-agent", "run", "--state", root+"/var/lib/anyshell/agent.json")
+		run := exec.Command(root+"/usr/local/bin/kotatsu-agent", "run", "--state", root+"/var/lib/kotatsu/agent.json")
 		run.Env = os.Environ()
 		if e = run.Start(); e != nil {
 			t.Fatal(e)

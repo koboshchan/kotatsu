@@ -19,17 +19,17 @@ import (
 // are adopted by this process, including children that create another session.
 // The private lifetime pipe closes on normal shutdown AND abrupt agent death.
 func init() {
-	if os.Getenv("_ANYSHELL_PTY_WORKER") != "1" {
+	if os.Getenv("_KOTATSU_PTY_WORKER") != "1" {
 		return
 	}
-	os.Unsetenv("_ANYSHELL_PTY_WORKER")
+	os.Unsetenv("_KOTATSU_PTY_WORKER")
 	os.Exit(runWorker())
 }
 func runWorker() int {
 	if os.Geteuid() == 0 {
 		return 126
 	}
-	control := os.NewFile(3, "anyshell-session-lifetime")
+	control := os.NewFile(3, "kotatsu-session-lifetime")
 	if control == nil {
 		return 126
 	}

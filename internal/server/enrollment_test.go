@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/koboshchan/anyshell/internal/agent"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/agent"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/relay"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -34,7 +34,7 @@ func TestInstallerCredentialSeparation(t *testing.T) {
 		}
 		if tc.code == 200 {
 			body := w.Body.String()
-			if !strings.Contains(body, "sha256sum -c") || !strings.Contains(body, "User=anyshell") || strings.Contains(body, "%!") {
+			if !strings.Contains(body, "sha256sum -c") || !strings.Contains(body, "User=kotatsu") || strings.Contains(body, "%!") {
 				t.Fatal("bad installer")
 			}
 		}

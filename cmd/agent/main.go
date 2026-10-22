@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/agent"
-	"github.com/koboshchan/anyshell/internal/version"
+	"github.com/koboshchan/kotatsu/internal/agent"
+	"github.com/koboshchan/kotatsu/internal/version"
 	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
@@ -21,10 +21,10 @@ func main() {
 	}
 }
 func run() error {
-	root := &cobra.Command{Use: "anyshell-agent", Version: version.Version, SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "kotatsu-agent", Version: version.Version, SilenceUsage: true, SilenceErrors: true}
 	var state, server string
 	var dev bool
-	root.PersistentFlags().StringVar(&state, "state", "/var/lib/anyshell/agent.json", "private agent state file")
+	root.PersistentFlags().StringVar(&state, "state", "/var/lib/kotatsu/agent.json", "private agent state file")
 	enroll := &cobra.Command{Use: "enroll", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() == 0 {
 			return errors.New("enroll and run the agent as an unprivileged account")

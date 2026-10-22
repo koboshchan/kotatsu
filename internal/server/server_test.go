@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/koboshchan/anyshell/internal/store"
+	"github.com/koboshchan/kotatsu/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"

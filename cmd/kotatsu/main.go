@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/client"
+	"github.com/koboshchan/kotatsu/internal/client"
 	"os"
 	"os/signal"
 	"syscall"

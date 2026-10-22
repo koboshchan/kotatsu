@@ -2,9 +2,9 @@ package server
 
 import (
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/auth"
-	"github.com/koboshchan/anyshell/internal/config"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/auth"
+	"github.com/koboshchan/kotatsu/internal/config"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -113,7 +113,7 @@ func (s *Server) script(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=anyshell-install.sh")
+	w.Header().Set("Content-Disposition", "attachment; filename=kotatsu-install.sh")
 	dev := ""
 	if s.Config.Dev {
 		dev = "--dev"
@@ -131,8 +131,8 @@ RELEASE_ORIGIN=%s
 VERSION=%s
 DEV_FLAG=%s
 DEVELOPMENT=%s
-die() { echo "AnyShell: $*" >&2; exit 1; }
-echo "AnyShell: checking Linux/systemd prerequisites"
+die() { echo "Kotatsu: $*" >&2; exit 1; }
+echo "Kotatsu: checking Linux/systemd prerequisites"
 [ "$(uname -s)" = Linux ] || die "only Linux is supported"
 case "$(uname -m)" in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported architecture" ;; esac
 [ "$(id -u)" = 0 ] || die "run this installer as root"
@@ -141,47 +141,47 @@ command -v curl >/dev/null || die "install curl first"
 command -v sha256sum >/dev/null || die "install sha256sum first"
 command -v tar >/dev/null || die "install tar first"
 for tool in getent useradd install runuser awk; do command -v "$tool" >/dev/null || die "install missing prerequisite $tool first"; done
-[ ! -e /var/lib/anyshell/agent.json ] || die "already enrolled; uninstall explicitly before enrolling again"
+[ ! -e /var/lib/kotatsu/agent.json ] || die "already enrolled; uninstall explicitly before enrolling again"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 PROTO='=https'
 [ "$DEVELOPMENT" != true ] || PROTO='=http,https'
 fetch() { curl --fail --silent --show-error --proto "$PROTO" --proto-redir "$PROTO" --tlsv1.2 "$1" -o "$2"; }
-ARTIFACT="anyshell-agent_${VERSION}_linux_${ARCH}.tar.gz"
-echo "AnyShell: downloading pinned release $VERSION for $ARCH"
+ARTIFACT="kotatsu-agent_${VERSION}_linux_${ARCH}.tar.gz"
+echo "Kotatsu: downloading pinned release $VERSION for $ARCH"
 fetch "$RELEASE_ORIGIN/releases/$VERSION/$ARTIFACT" "$WORK/$ARTIFACT" || die "agent download failed"
 fetch "$RELEASE_ORIGIN/releases/$VERSION/SHA256SUMS" "$WORK/SHA256SUMS" || die "checksum download failed"
 (cd "$WORK"; awk -v artifact="$ARTIFACT" '$2 == artifact { print }' SHA256SUMS > selected; [ "$(wc -l < selected)" -eq 1 ] && sha256sum -c selected) || die "checksum verification failed; nothing installed"
 tar -tzf "$WORK/$ARTIFACT" > "$WORK/contents"
-[ "$(cat "$WORK/contents")" = anyshell-agent ] || die "unexpected release archive contents"
+[ "$(cat "$WORK/contents")" = kotatsu-agent ] || die "unexpected release archive contents"
 tar -xzf "$WORK/$ARTIFACT" -C "$WORK" --no-same-owner
-[ -f "$WORK/anyshell-agent" ] && [ ! -L "$WORK/anyshell-agent" ] || die "invalid agent artifact"
-echo "AnyShell: creating restricted service account"
-getent passwd anyshell >/dev/null || useradd --system --home-dir /var/lib/anyshell --create-home --shell /usr/sbin/nologin anyshell
-install -d -m 0700 -o anyshell -g anyshell /var/lib/anyshell
-install -m 0755 "$WORK/anyshell-agent" /usr/local/bin/anyshell-agent
-echo "AnyShell: enrolling this machine"
+[ -f "$WORK/kotatsu-agent" ] && [ ! -L "$WORK/kotatsu-agent" ] || die "invalid agent artifact"
+echo "Kotatsu: creating restricted service account"
+getent passwd kotatsu >/dev/null || useradd --system --home-dir /var/lib/kotatsu --create-home --shell /usr/sbin/nologin kotatsu
+install -d -m 0700 -o kotatsu -g kotatsu /var/lib/kotatsu
+install -m 0755 "$WORK/kotatsu-agent" /usr/local/bin/kotatsu-agent
+echo "Kotatsu: enrolling this machine"
 # Token travels on standard input, never in process arguments or unit files.
-printf '%%s\n' "$TOKEN" | runuser -u anyshell -- /usr/local/bin/anyshell-agent enroll --server "$SERVER" --state /var/lib/anyshell/agent.json $DEV_FLAG || die "enrollment failed"
+printf '%%s\n' "$TOKEN" | runuser -u kotatsu -- /usr/local/bin/kotatsu-agent enroll --server "$SERVER" --state /var/lib/kotatsu/agent.json $DEV_FLAG || die "enrollment failed"
 unset TOKEN
-cat > /etc/systemd/system/anyshell-agent.service <<'UNIT'
+cat > /etc/systemd/system/kotatsu-agent.service <<'UNIT'
 [Unit]
-Description=AnyShell outbound machine agent
+Description=Kotatsu outbound machine agent
 After=network-online.target
 Wants=network-online.target
 [Service]
-User=anyshell
-Group=anyshell
-ExecStart=/usr/local/bin/anyshell-agent run --state /var/lib/anyshell/agent.json
+User=kotatsu
+Group=kotatsu
+ExecStart=/usr/local/bin/kotatsu-agent run --state /var/lib/kotatsu/agent.json
 Restart=always
 RestartSec=5
-WorkingDirectory=/var/lib/anyshell
-Environment=HOME=/var/lib/anyshell
+WorkingDirectory=/var/lib/kotatsu
+Environment=HOME=/var/lib/kotatsu
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/anyshell
+ReadWritePaths=/var/lib/kotatsu
 UMask=0077
 KillMode=control-group
 TimeoutStopSec=10
@@ -189,8 +189,8 @@ TimeoutStopSec=10
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now anyshell-agent.service || die "could not start service; check journalctl -u anyshell-agent"
-echo "AnyShell: enrolled and started. Shells run as the unprivileged anyshell user."
+systemctl enable --now kotatsu-agent.service || die "could not start service; check journalctl -u kotatsu-agent"
+echo "Kotatsu: enrolled and started. Shells run as the unprivileged kotatsu user."
 `
 
 func (s *Server) revokeMachine(w http.ResponseWriter, r *http.Request) {

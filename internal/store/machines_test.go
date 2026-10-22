@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
-	"github.com/koboshchan/anyshell/internal/api"
+	"github.com/koboshchan/kotatsu/internal/api"
 	"sync"
 	"testing"
 	"time"

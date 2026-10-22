@@ -3,16 +3,16 @@ services:
     build:
       context: .
       args:
-        VERSION: ${ANYSHELL_RELEASE_VERSION:-dev}
+        VERSION: ${KOTATSU_RELEASE_VERSION:-dev}
     environment:
-      ANYSHELL_LISTEN: 0.0.0.0:8080
-      ANYSHELL_DB: /data/anyshell.db
-      ANYSHELL_PUBLIC_URL: ${ANYSHELL_PUBLIC_URL:?Set the public HTTPS origin}
-      ANYSHELL_TRUSTED_PROXIES: ${ANYSHELL_TRUSTED_PROXIES:-}
-      ANYSHELL_RELEASE_VERSION: ${ANYSHELL_RELEASE_VERSION:?Set a pinned release tag}
-      ANYSHELL_RELEASE_URL: ${ANYSHELL_RELEASE_URL:?Set the HTTPS release origin}
+      KOTATSU_LISTEN: 0.0.0.0:8080
+      KOTATSU_DB: /data/kotatsu.db
+      KOTATSU_PUBLIC_URL: ${KOTATSU_PUBLIC_URL:?Set the public HTTPS origin}
+      KOTATSU_TRUSTED_PROXIES: ${KOTATSU_TRUSTED_PROXIES:-}
+      KOTATSU_RELEASE_VERSION: ${KOTATSU_RELEASE_VERSION:?Set a pinned release tag}
+      KOTATSU_RELEASE_URL: ${KOTATSU_RELEASE_URL:?Set the HTTPS release origin}
     ports:
-      - "127.0.0.1:${ANYSHELL_PORT:-28473}:8080"
+      - "127.0.0.1:${KOTATSU_PORT:-28473}:8080"
     volumes:
       - data:/data
     restart: unless-stopped
@@ -24,7 +24,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "/anyshell-server", "healthcheck"]
+      test: ["CMD", "/kotatsu-server", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

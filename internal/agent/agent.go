@@ -5,9 +5,9 @@ package agent
 import (
 	"context"
 	"errors"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/client"
-	"github.com/koboshchan/anyshell/internal/config"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/client"
+	"github.com/koboshchan/kotatsu/internal/config"
 	"os"
 	"runtime"
 )

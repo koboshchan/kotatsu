@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
-	"github.com/koboshchan/anyshell/internal/api"
-	"github.com/koboshchan/anyshell/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/api"
+	"github.com/koboshchan/kotatsu/internal/relay"
 	"log/slog"
 	"math/rand/v2"
 	"os"

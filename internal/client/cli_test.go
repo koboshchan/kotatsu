@@ -3,9 +3,9 @@ package client
 import (
 	"bytes"
 	"context"
-	"github.com/koboshchan/anyshell/internal/config"
-	"github.com/koboshchan/anyshell/internal/server"
-	"github.com/koboshchan/anyshell/internal/store"
+	"github.com/koboshchan/kotatsu/internal/config"
+	"github.com/koboshchan/kotatsu/internal/server"
+	"github.com/koboshchan/kotatsu/internal/store"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -69,5 +69,18 @@ func TestCLIAccountAndInventory(t *testing.T) {
 	config.Load(cfgPath, &cfg)
 	if cfg.Token != "" {
 		t.Fatal("stored failed token")
+	}
+}
+
+func TestCLIUsesKotatsuName(t *testing.T) {
+	cmd := NewCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Name() != "kotatsu" || !strings.Contains(out.String(), "kotatsu [command]") || strings.Contains(strings.ToLower(out.String()), "any"+"shell") {
+		t.Fatalf("unexpected CLI identity: %s", out.String())
 	}
 }

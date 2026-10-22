@@ -6,7 +6,7 @@ import (
 	"context"
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
-	"github.com/koboshchan/anyshell/internal/relay"
+	"github.com/koboshchan/kotatsu/internal/relay"
 	"os"
 	"os/exec"
 )
@@ -35,7 +35,7 @@ func startShell(ctx context.Context, c *websocket.Conn, f relay.Frame) (*shellSe
 		return nil, err
 	}
 	cmd := exec.Command(executable)
-	cmd.Env = append(os.Environ(), "TERM="+f.Term, "_ANYSHELL_PTY_WORKER=1")
+	cmd.Env = append(os.Environ(), "TERM="+f.Term, "_KOTATSU_PTY_WORKER=1")
 	cmd.ExtraFiles = []*os.File{readEnd}
 	file, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: f.Rows, Cols: f.Cols})
 	_ = readEnd.Close()
