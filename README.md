@@ -111,13 +111,13 @@ KOTATSU_RELEASE_URL=https://releases.example.com
 KOTATSU_PORT=28473
 ```
 
-The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and runs MongoDB 7 without authentication and without published ports; only containers on the Compose network can reach it by the service name `mongo`, and its data lives in the persistent `mongo-data` volume. Never publish the MongoDB port.
+The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and runs MongoDB 7 without authentication and without published ports; only containers on the Compose network can reach it by the service name `mongo`, and its data lives in the persistent `mongo-data` volume. Never publish the MongoDB port. Compose initializes a single-node replica set named `kotatsu` so registration, token rotation and enrollment use real MongoDB transactions. An external MongoDB must also be a replica set; standalone servers are rejected at startup.
 
 | Variable | Purpose |
 | --- | --- |
 | `KOTATSU_PUBLIC_URL` | Canonical HTTPS origin; defaults to `https://localhost`. |
 | `KOTATSU_LISTEN` | Server bind address; defaults to `127.0.0.1:8080` outside Compose. |
-| `KOTATSU_MONGO_URI` | MongoDB connection string, required (Compose uses `mongodb://mongo:27017`). |
+| `KOTATSU_MONGO_URI` | MongoDB connection string, required (Compose uses `mongodb://mongo:27017/kotatsu?replicaSet=kotatsu`). |
 | `KOTATSU_MONGO_DB` | MongoDB database name; defaults to `kotatsu`. |
 | `KOTATSU_TEST_MONGO_URI` | Tests only: disposable MongoDB; each test uses and drops a unique database. Tests are skipped when unset. |
 | `KOTATSU_TRUSTED_PROXIES` | Comma-separated trusted forwarding CIDRs; empty by default. |
@@ -133,7 +133,7 @@ HTTPS is required outside development, either directly or asserted by an explici
 
 ## Architecture and security
 
-One Go module contains `cmd/server`, `cmd/kotatsu` and `cmd/agent`. The server embeds the HTML/JavaScript UI and stores state in MongoDB with unique indexes for names, token hashes and machine IDs. Versioned REST endpoints under `/api/v1` handle accounts, credentials, enrollment, inventory and revocation; authenticated WebSockets carry agent control and terminal sessions.
+One Go module contains `cmd/server`, `cmd/kotatsu` and `cmd/agent`. The server embeds the HTML/JavaScript UI and stores state in MongoDB with unique indexes for names, token hashes and machine IDs, with owner-scoped queries and transactions for related writes. Versioned REST endpoints under `/api/v1` handle accounts, credentials, enrollment, inventory and revocation; authenticated WebSockets carry agent control and terminal sessions.
 
 Account API tokens, enrollment tokens and machine credentials are distinct random bearer tokens. Only hashes are stored. Ownership checks protect machine and session operations; seven-digit display IDs are convenience identifiers, not secrets. Enrollment defaults to one use and 15 minutes, with explicit reusable tokens capped at 24 hours.
 

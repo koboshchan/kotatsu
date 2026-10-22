@@ -75,39 +75,35 @@ func (s *Store) Enroll(ctx context.Context, in api.EnrollRequest, ip string) (ap
 	if err != nil {
 		return out, err
 	}
-	// Atomically consume one use; concurrent single-use enrollments cannot both win.
-	var tok struct {
-		ID    string `bson:"_id"`
-		Owner string `bson:"owner_id"`
-	}
-	err = s.c("enrollment_tokens").FindOneAndUpdate(ctx, s.enrollmentFilter(in.Token), bson.M{"$inc": bson.M{"used": 1}}).Decode(&tok)
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return out, ErrUnauthorized
-	}
-	if err != nil {
-		return out, err
-	}
-	release := func() {
-		s.c("enrollment_tokens").UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": tok.ID}, bson.M{"$inc": bson.M{"used": -1}})
-	}
 	m := api.Machine{ID: uuid.NewString(), Name: in.Name, Platform: in.Platform, PublicIP: ip, CreatedAt: s.Now().UTC(), LastSeen: s.Now().UTC(), Online: true}
 	for tries := 0; tries < 32; tries++ {
 		m.DisplayID, err = s.NewDisplayID()
 		if err != nil {
-			release()
 			return out, err
 		}
-		_, err = s.c("machines").InsertOne(ctx, bson.M{"_id": m.ID, "display_id": m.DisplayID, "owner_id": tok.Owner, "name": m.Name, "platform": m.Platform, "public_ip": ip, "created_at": m.CreatedAt.Unix(), "last_seen": m.LastSeen.Unix(), "credential_hash": auth.Hash(credential), "revoked": false})
+		err = s.transaction(ctx, func(tx context.Context) error {
+			var tok struct {
+				Owner string `bson:"owner_id"`
+			}
+			err := s.c("enrollment_tokens").FindOneAndUpdate(tx, s.enrollmentFilter(in.Token), bson.M{"$inc": bson.M{"used": 1}}).Decode(&tok)
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return ErrUnauthorized
+			}
+			if err != nil {
+				return err
+			}
+			_, err = s.c("machines").InsertOne(tx, bson.M{"_id": m.ID, "display_id": m.DisplayID, "owner_id": tok.Owner, "name": m.Name, "platform": m.Platform, "public_ip": ip, "created_at": m.CreatedAt.Unix(), "last_seen": m.LastSeen.Unix(), "credential_hash": auth.Hash(credential), "revoked": false})
+			return err
+		})
+		// Retry the whole transaction: the rejected ID must not consume a token.
 		if mongo.IsDuplicateKeyError(err) {
 			continue
 		}
 		if err != nil {
-			release()
 			return out, err
 		}
 		return api.Enrolled{Machine: m, Credential: credential}, nil
 	}
-	release()
 	return out, fmt.Errorf("machine ID allocation exhausted")
 }
 

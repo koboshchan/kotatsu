@@ -52,15 +52,22 @@ func Open(uri, database string) (*Store, error) {
 		client.Disconnect(context.Background())
 		return nil, err
 	}
-	unique := func(coll string, keys bson.D) mongo.IndexModel {
+	var hello struct {
+		SetName string `bson:"setName"`
+	}
+	if err = s.db.RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&hello); err != nil || hello.SetName == "" {
+		client.Disconnect(context.Background())
+		return nil, errors.New("MongoDB replica set required for atomic registration, token rotation and enrollment")
+	}
+	unique := func(keys bson.D) mongo.IndexModel {
 		return mongo.IndexModel{Keys: keys, Options: options.Index().SetUnique(true)}
 	}
 	plain := func(keys bson.D) mongo.IndexModel { return mongo.IndexModel{Keys: keys} }
 	indexes := map[string][]mongo.IndexModel{
-		"accounts":          {unique("accounts", bson.D{{Key: "name", Value: 1}})},
-		"account_tokens":    {unique("", bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
-		"enrollment_tokens": {unique("", bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
-		"machines":          {unique("", bson.D{{Key: "display_id", Value: 1}}), unique("", bson.D{{Key: "credential_hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"accounts":          {unique(bson.D{{Key: "name", Value: 1}})},
+		"account_tokens":    {unique(bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"enrollment_tokens": {unique(bson.D{{Key: "hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
+		"machines":          {unique(bson.D{{Key: "display_id", Value: 1}}), unique(bson.D{{Key: "credential_hash", Value: 1}}), plain(bson.D{{Key: "owner_id", Value: 1}})},
 		"sessions":          {plain(bson.D{{Key: "ended_at", Value: 1}})},
 	}
 	for name, models := range indexes {
@@ -77,6 +84,19 @@ func Open(uri, database string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// transaction keeps multi-document mutations all-or-nothing, including crashes.
+func (s *Store) transaction(ctx context.Context, fn func(context.Context) error) error {
+	session, err := s.client.StartSession()
+	if err != nil {
+		return err
+	}
+	defer session.EndSession(ctx)
+	_, err = session.WithTransaction(ctx, func(tx context.Context) (any, error) {
+		return nil, fn(tx)
+	})
+	return err
 }
 func (s *Store) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
@@ -105,16 +125,17 @@ func (s *Store) Register(ctx context.Context, name string) (api.Registration, er
 	}
 	out.Account = api.Account{ID: uuid.NewString(), Name: name}
 	out.Token = api.Token{ID: uuid.NewString(), Token: raw, CreatedAt: s.Now().UTC()}
-	if _, err = s.c("accounts").InsertOne(ctx, bson.M{"_id": out.Account.ID, "name": name, "created_at": s.Now().Unix()}); err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			return api.Registration{}, ErrConflict
+	err = s.transaction(ctx, func(tx context.Context) error {
+		if _, err := s.c("accounts").InsertOne(tx, bson.M{"_id": out.Account.ID, "name": name, "created_at": s.Now().Unix()}); err != nil {
+			return err
 		}
-		return api.Registration{}, err
+		_, err := s.c("account_tokens").InsertOne(tx, bson.M{"_id": out.Token.ID, "owner_id": out.Account.ID, "hash": auth.Hash(raw), "created_at": out.Token.CreatedAt.Unix(), "revoked": false})
+		return err
+	})
+	if mongo.IsDuplicateKeyError(err) {
+		return api.Registration{}, ErrConflict
 	}
-	_, err = s.c("account_tokens").InsertOne(ctx, bson.M{"_id": out.Token.ID, "owner_id": out.Account.ID, "hash": auth.Hash(raw), "created_at": out.Token.CreatedAt.Unix(), "revoked": false})
 	if err != nil {
-		// No transactions on a standalone MongoDB: undo the account so the name is not lost.
-		s.c("accounts").DeleteOne(context.WithoutCancel(ctx), bson.M{"_id": out.Account.ID})
 		return api.Registration{}, err
 	}
 	return out, nil
@@ -170,17 +191,16 @@ func (s *Store) IssueToken(ctx context.Context, owner, rotateID string) (api.Tok
 		return api.Token{}, err
 	}
 	out := api.Token{ID: uuid.NewString(), Token: raw, CreatedAt: s.Now().UTC()}
-	if rotateID != "" {
-		// Revoke atomically first so only one concurrent rotation can win.
-		if err = s.RevokeToken(ctx, owner, rotateID); err != nil {
-			return api.Token{}, err
-		}
-	}
-	_, err = s.c("account_tokens").InsertOne(ctx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "created_at": out.CreatedAt.Unix(), "revoked": false})
-	if err != nil {
+	err = s.transaction(ctx, func(tx context.Context) error {
 		if rotateID != "" {
-			s.c("account_tokens").UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": rotateID, "owner_id": owner}, bson.M{"$set": bson.M{"revoked": false}})
+			if err := s.RevokeToken(tx, owner, rotateID); err != nil {
+				return err
+			}
 		}
+		_, err := s.c("account_tokens").InsertOne(tx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "created_at": out.CreatedAt.Unix(), "revoked": false})
+		return err
+	})
+	if err != nil {
 		return api.Token{}, err
 	}
 	return out, nil

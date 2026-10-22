@@ -1,12 +1,12 @@
 services:
   mongo:
     image: mongo:7
-    command: ["mongod", "--bind_ip_all", "--noauth"]
+    command: ["mongod", "--bind_ip_all", "--noauth", "--replSet", "kotatsu"]
     restart: unless-stopped
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok && db.hello().isWritablePrimary } catch (e) { rs.initiate({_id:'kotatsu',members:[{_id:0,host:'mongo:27017'}]}).ok; false }"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -22,7 +22,7 @@ services:
         condition: service_healthy
     environment:
       KOTATSU_LISTEN: 0.0.0.0:8080
-      KOTATSU_MONGO_URI: mongodb://mongo:27017
+      KOTATSU_MONGO_URI: mongodb://mongo:27017/kotatsu?replicaSet=kotatsu
       KOTATSU_MONGO_DB: kotatsu
       KOTATSU_PUBLIC_URL: ${KOTATSU_PUBLIC_URL:?Set the public HTTPS origin}
       KOTATSU_TRUSTED_PROXIES: ${KOTATSU_TRUSTED_PROXIES:-}
