@@ -4,7 +4,7 @@ services:
     command: ["mongod", "--bind_ip_all", "--noauth", "--replSet", "kotatsu"]
     restart: unless-stopped
     volumes:
-      - mongo-data:/data/db
+      - ./.docker-data/mongo:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok && db.hello().isWritablePrimary } catch (e) { rs.initiate({_id:'kotatsu',members:[{_id:0,host:'mongo:27017'}]}).ok; false }"]
       interval: 10s
@@ -13,10 +13,12 @@ services:
     # No published ports and no authentication: reachable only by service name
     # (mongo) on this compose project's private network.
   server:
-    build:
-      context: .
-      args:
-        VERSION: ${KOTATSU_RELEASE_VERSION:-dev}
+    image: ${KOTATSU_IMAGE:-ghcr.io/koboshchan/kotatsu:${KOTATSU_RELEASE_VERSION:-latest}}
+    # Prefer pre-built Docker image; build from context only when needed
+    # build:
+    #   context: .
+    #   args:
+    #     VERSION: ${KOTATSU_RELEASE_VERSION:-dev}
     depends_on:
       mongo:
         condition: service_healthy
@@ -44,5 +46,3 @@ services:
       timeout: 5s
       retries: 3
     stop_grace_period: 15s
-volumes:
-  mongo-data:

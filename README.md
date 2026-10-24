@@ -83,7 +83,7 @@ Global flags are `--server`, `--config` and `--dev`. Run `kotatsu --help` or a s
 
 ## Linux service installation
 
-Publish a pinned release before using the generated installer. Set `KOTATSU_RELEASE_VERSION=v0.1.0` and `KOTATSU_RELEASE_URL=https://releases.example.com`. That origin must serve `/releases/v0.1.0/SHA256SUMS` and `kotatsu-agent_v0.1.0_linux_amd64.tar.gz` or its arm64 equivalent.
+Publish a pinned release before using the generated installer. Set `KATATSU_RELEASE_VERSION=v0.1.0` and `KOTATSU_RELEASE_URL=https://github.com/koboshchan/kotatsu/releases/download`. That origin must serve the artifact (e.g., `kotatsu-agent_v0.1.0_linux_amd64.tar.gz`) and `SHA256SUMS` for that release. Release workflows mark the GitHub release as a pre-release and publish both the checksummed agent binaries and the Docker image.
 
 For GitHub-hosted release assets, map this path to the tagged GitHub download at your reverse proxy. Alternatively, `KOTATSU_RELEASE_DIR` serves an allowlisted local release directory through the server.
 
@@ -104,17 +104,17 @@ Checksums depend on trusting the HTTPS release origin. An attacker controlling t
 
 ## Docker deployment and configuration
 
-Create a private deployment environment file and run `docker compose up -d --build`.
+Create a private deployment environment file from `.env.example` and run `docker compose up -d`. The server service prefers a pre-built Docker image (`ghcr.io/koboshchan/kotatsu:<tag>`) published by the release workflow; set `KOTATSU_IMAGE` to override. Build from context only when needed.
 
 ```dotenv
 KOTATSU_PUBLIC_URL=https://shell.example.com
 KOTATSU_TRUSTED_PROXIES=172.20.0.1/32
 KOTATSU_RELEASE_VERSION=v0.1.0
-KOTATSU_RELEASE_URL=https://releases.example.com
+KOTATSU_RELEASE_URL=https://github.com/koboshchan/kotatsu/releases/download
 KOTATSU_PORT=28473
 ```
 
-The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and runs MongoDB 7 without authentication and without published ports; only containers on the Compose network can reach it by the service name `mongo`, and its data lives in the persistent `mongo-data` volume. Never publish the MongoDB port. Compose initializes a single-node replica set named `kotatsu` so registration, token rotation and enrollment use real MongoDB transactions. An external MongoDB must also be a replica set; standalone servers are rejected at startup.
+The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy address. Compose binds the server to loopback and runs MongoDB 7 without authentication and without published ports; only containers on the Compose network can reach it by the service name `mongo`, and its data lives in the bind-mounted `.docker-data/mongo` directory (git- and dockerignored). Never publish the MongoDB port. Compose initializes a single-node replica set named `kotatsu` so registration, token rotation and enrollment use real MongoDB transactions. An external MongoDB must also be a replica set; standalone servers are rejected at startup.
 
 | Variable | Purpose |
 | --- | --- |
@@ -125,7 +125,7 @@ The proxy CIDR is an example, not a default to copy. Set your actual TLS proxy a
 | `KOTATSU_TEST_MONGO_URI` | Tests only: disposable MongoDB; each test uses and drops a unique database. Tests are skipped when unset. |
 | `KOTATSU_TRUSTED_PROXIES` | Comma-separated trusted forwarding CIDRs; empty by default. |
 | `KOTATSU_RELEASE_VERSION` | Pinned agent release tag. |
-| `KOTATSU_RELEASE_URL` | HTTPS origin serving pinned release artifacts. |
+| `KOTATSU_RELEASE_URL` | HTTPS origin serving pinned release artifacts. For GitHub releases, use `https://github.com/OWNER/REPO/releases/download`. |
 | `KOTATSU_RELEASE_DIR` | Optional local directory for allowlisted release files. |
 | `KOTATSU_PORT` | Compose loopback host port; defaults to `28473`. |
 | `KOTATSU_DEV` | Set to `1` for explicit development-only HTTP. |

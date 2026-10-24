@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /data/
+.docker-data/
 *.db
 *.db-*
 *.log

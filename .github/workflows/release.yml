@@ -4,21 +4,45 @@ on:
     tags:
       - 'v*'
 permissions:
-  contents: read
+  contents: write
+  packages: write
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - run: make check
-      - run: VERSION="${GITHUB_REF_NAME}" ./scripts/release.sh
-      - name: Publish checksummed release
+      - run: VERSION="${GITHUB_REF_NAME}" KOTATSU_RELEASE_URL=https://github.com/${{ github.repository }}/releases/download ./scripts/release.sh
+      - name: Publish checksummed pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --prerelease --verify-tag --generate-notes
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

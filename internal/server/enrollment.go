@@ -150,8 +150,8 @@ PROTO='=https'
 fetch() { curl --fail --silent --show-error --proto "$PROTO" --proto-redir "$PROTO" --tlsv1.2 "$1" -o "$2"; }
 ARTIFACT="kotatsu-agent_${VERSION}_linux_${ARCH}.tar.gz"
 echo "Kotatsu: downloading pinned release $VERSION for $ARCH"
-fetch "$RELEASE_ORIGIN/releases/$VERSION/$ARTIFACT" "$WORK/$ARTIFACT" || die "agent download failed"
-fetch "$RELEASE_ORIGIN/releases/$VERSION/SHA256SUMS" "$WORK/SHA256SUMS" || die "checksum download failed"
+fetch "$RELEASE_ORIGIN/$VERSION/$ARTIFACT" "$WORK/$ARTIFACT" || die "agent download failed"
+fetch "$RELEASE_ORIGIN/$VERSION/SHA256SUMS" "$WORK/SHA256SUMS" || die "checksum download failed"
 (cd "$WORK"; awk -v artifact="$ARTIFACT" '$2 == artifact { print }' SHA256SUMS > selected; [ "$(wc -l < selected)" -eq 1 ] && sha256sum -c selected) || die "checksum verification failed; nothing installed"
 tar -tzf "$WORK/$ARTIFACT" > "$WORK/contents"
 [ "$(cat "$WORK/contents")" = kotatsu-agent ] || die "unexpected release archive contents"

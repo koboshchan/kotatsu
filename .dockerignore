@@ -2,6 +2,7 @@
 bin
 dist
 data
+.docker-data/
 .env
 *.db
 *.db-*

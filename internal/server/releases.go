@@ -26,4 +26,20 @@ func (s *Server) releaseRoutes() {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		http.ServeFile(w, r, path)
 	})
+	s.mux.HandleFunc("GET /{version}/{file}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("file")
+		if s.Config.ReleaseDir == "" || r.PathValue("version") != s.Config.ReleaseVersion || !releaseFile.MatchString(name) {
+			http.NotFound(w, r)
+			return
+		}
+		path := filepath.Join(s.Config.ReleaseDir, name)
+		info, e := os.Lstat(path)
+		if e != nil || !info.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
+		}
+		// No directory server, symlinks, hidden files, databases or token files.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		http.ServeFile(w, r, path)
+	})
 }
