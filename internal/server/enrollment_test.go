@@ -17,7 +17,7 @@ func TestInstallerCredentialSeparation(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 	a, _ := s.Store.Register(ctx, "alice")
-	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	s.Config.ReleaseVersion = "v0.1.0"
 	s.Config.ReleaseURL = "http://localhost"
 	for _, tc := range []struct {
@@ -34,7 +34,7 @@ func TestInstallerCredentialSeparation(t *testing.T) {
 		}
 		if tc.code == 200 {
 			body := w.Body.String()
-			if !strings.Contains(body, "sha256sum -c") || !strings.Contains(body, "User=kotatsu") || strings.Contains(body, "%!") {
+			if !strings.Contains(body, "sha256sum -c") || !strings.Contains(body, "User=$INSTALL_USER") || strings.Contains(body, "%!") {
 				t.Fatal("bad installer")
 			}
 		}
@@ -64,11 +64,50 @@ func TestInstallerCredentialSeparation(t *testing.T) {
 	}
 }
 
+func TestShortEnrollmentCode(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	a, _ := s.Store.Register(ctx, "short-owner")
+	e, err := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, true)
+	if err != nil || !api.IsShortCode(e.ShortCode) {
+		t.Fatal(e.ShortCode, err)
+	}
+	s.Config.ReleaseVersion = "v0.1.0"
+	s.Config.ReleaseURL = "http://localhost"
+	// Both the long token and the short code serve the installer.
+	for _, code := range []string{e.Token, e.ShortCode} {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", "/script/"+code, nil))
+		if w.Code != 200 {
+			t.Fatal(code, w.Code, w.Body.String())
+		}
+	}
+	// Unknown short codes are rejected.
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/script/zzzzzz", nil))
+	if w.Code != 401 {
+		t.Fatal("unknown short code", w.Code)
+	}
+	// The short code enrolls a machine.
+	body, _ := json.Marshal(api.EnrollRequest{Token: e.ShortCode, Name: "short-test", Platform: "linux/amd64"})
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/machines/enroll", strings.NewReader(string(body))))
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	// A one-use short code is consumed by enrollment.
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/script/"+e.ShortCode, nil))
+	if w.Code != 401 {
+		t.Fatal("used short code", w.Code)
+	}
+}
+
 func TestAgentAuthenticatedBeforeRevocationCannotRegister(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 	a, _ := s.Store.Register(ctx, "race-owner")
-	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	m, err := s.Store.Enroll(ctx, api.EnrollRequest{Token: e.Token, Name: "race"}, "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +148,7 @@ func TestAgentAutomaticallyReconnectsAfterTransportDrop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	a, _ := s.Store.Register(ctx, "reconnect")
-	token, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	token, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	state, e := agent.Enroll(ctx, srv.URL, token.Token, filepath.Join(t.TempDir(), "agent.json"), true)
 	if e != nil {
 		t.Fatal(e)

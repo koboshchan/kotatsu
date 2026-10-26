@@ -17,7 +17,7 @@ func TestEnrollmentInventoryHeartbeat(t *testing.T) {
 	s.Now = func() time.Time { return now }
 	a, _ := s.Register(ctx, "alice")
 	b, _ := s.Register(ctx, "bob")
-	token, e := s.CreateEnrollment(ctx, a.Account.ID, false, 15*time.Minute)
+	token, e := s.CreateEnrollment(ctx, a.Account.ID, false, 15*time.Minute, false)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -54,12 +54,12 @@ func TestEnrollmentInventoryHeartbeat(t *testing.T) {
 	if !list[0].Online || list[0].PublicIP != "192.0.2.2" {
 		t.Fatal(list)
 	}
-	expired, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Second)
+	expired, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Second, false)
 	now = now.Add(time.Second)
 	if e = s.EnrollmentValid(ctx, expired.Token); e != ErrUnauthorized {
 		t.Fatal("expiration", e)
 	}
-	revoked, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	revoked, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	if e = s.RevokeEnrollment(ctx, b.Account.ID, revoked.ID); e != ErrNotFound {
 		t.Fatal("IDOR")
 	}
@@ -67,7 +67,7 @@ func TestEnrollmentInventoryHeartbeat(t *testing.T) {
 	if e = s.EnrollmentValid(ctx, revoked.Token); e != ErrUnauthorized {
 		t.Fatal("revoked")
 	}
-	reusable, _ := s.CreateEnrollment(ctx, a.Account.ID, true, time.Minute)
+	reusable, _ := s.CreateEnrollment(ctx, a.Account.ID, true, time.Minute, false)
 	for n := 0; n < 2; n++ {
 		if _, e = s.Enroll(ctx, api.EnrollRequest{Token: reusable.Token, Name: "reuse"}, "1"); e != nil {
 			t.Fatal(e)
@@ -79,7 +79,7 @@ func TestCollisionAndSingleRedemption(t *testing.T) {
 	ctx := context.Background()
 	a, _ := s.Register(ctx, "owner")
 	s.NewDisplayID = func() (string, error) { return "1234567", nil }
-	one, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	one, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	_, e := s.Enroll(ctx, api.EnrollRequest{Token: one.Token, Name: "one"}, "1")
 	if e != nil {
 		t.Fatal(e)
@@ -92,7 +92,7 @@ func TestCollisionAndSingleRedemption(t *testing.T) {
 		}
 		return fmt.Sprintf("%07d", 1234567+n), nil
 	}
-	two, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	two, _ := s.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	var wg sync.WaitGroup
 	success := make(chan bool, 8)
 	for i := 0; i < 8; i++ {

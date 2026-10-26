@@ -10,10 +10,25 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"math/rand"
+	"strings"
 	"time"
 )
 
-func (s *Store) CreateEnrollment(ctx context.Context, owner string, reusable bool, ttl time.Duration) (api.Enrollment, error) {
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
+func randString(n int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteByte(chars[rand.Intn(len(chars))])
+	}
+	return b.String()
+}
+
+func (s *Store) CreateEnrollment(ctx context.Context, owner string, reusable bool, ttl time.Duration, short bool) (api.Enrollment, error) {
 	if ttl <= 0 || ttl > 24*time.Hour {
 		return api.Enrollment{}, errors.New("expiry must be within 24 hours")
 	}
@@ -22,6 +37,11 @@ func (s *Store) CreateEnrollment(ctx context.Context, owner string, reusable boo
 		return api.Enrollment{}, err
 	}
 	out := api.Enrollment{ID: uuid.NewString(), Token: raw, Reusable: reusable, ExpiresAt: s.Now().Add(ttl).UTC()}
+	if short {
+		out.ShortCode = randString(6)
+		_, err = s.c("enrollment_tokens").InsertOne(ctx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "short_code": out.ShortCode, "reusable": reusable, "expires_at": out.ExpiresAt.Unix(), "revoked": false, "used": 0})
+		return out, err
+	}
 	_, err = s.c("enrollment_tokens").InsertOne(ctx, bson.M{"_id": out.ID, "owner_id": owner, "hash": auth.Hash(raw), "reusable": reusable, "expires_at": out.ExpiresAt.Unix(), "revoked": false, "used": 0})
 	return out, err
 }
@@ -57,7 +77,13 @@ func (s *Store) RevokeEnrollment(ctx context.Context, owner, id string) error {
 	return nil
 }
 func (s *Store) enrollmentFilter(token string) bson.M {
-	return bson.M{"hash": auth.Hash(token), "revoked": false, "expires_at": bson.M{"$gt": s.Now().Unix()}, "$or": bson.A{bson.M{"reusable": true}, bson.M{"used": 0}}}
+	f := bson.M{"revoked": false, "expires_at": bson.M{"$gt": s.Now().Unix()}, "$or": bson.A{bson.M{"reusable": true}, bson.M{"used": 0}}}
+	if api.IsShortCode(token) {
+		f["short_code"] = token
+	} else {
+		f["hash"] = auth.Hash(token)
+	}
+	return f
 }
 func (s *Store) EnrollmentValid(ctx context.Context, token string) error {
 	err := s.c("enrollment_tokens").FindOne(ctx, s.enrollmentFilter(token)).Err()
@@ -65,6 +91,11 @@ func (s *Store) EnrollmentValid(ctx context.Context, token string) error {
 		return ErrUnauthorized
 	}
 	return err
+}
+
+// EnrollmentValidByShortCode validates an enrollment by its short code.
+func (s *Store) EnrollmentValidByShortCode(ctx context.Context, code string) error {
+	return s.EnrollmentValid(ctx, code)
 }
 func (s *Store) Enroll(ctx context.Context, in api.EnrollRequest, ip string) (api.Enrolled, error) {
 	out := api.Enrolled{}

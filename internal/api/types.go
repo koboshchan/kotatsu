@@ -4,6 +4,20 @@ import "time"
 
 const Prefix = "/api/v1"
 
+// IsShortCode reports whether s is a 6-character lowercase alphanumeric
+// enrollment code. Long enrollment tokens are prefixed with "ae_".
+func IsShortCode(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
 type Account struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -20,6 +34,7 @@ type Registration struct {
 type Enrollment struct {
 	ID        string    `json:"id"`
 	Token     string    `json:"token,omitempty"`
+	ShortCode string    `json:"short_code,omitempty"`
 	Reusable  bool      `json:"reusable"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Used      int       `json:"used"`

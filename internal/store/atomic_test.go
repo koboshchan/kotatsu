@@ -49,7 +49,7 @@ func TestConcurrentSingleUseAndCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := s.CreateEnrollment(ctx, a.Account.ID, false, time.Hour)
+	token, err := s.CreateEnrollment(ctx, a.Account.ID, false, time.Hour, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestConcurrentSingleUseAndCollision(t *testing.T) {
 	if err != nil || len(ms) != 1 {
 		t.Fatal(ms, err)
 	}
-	token, err = s.CreateEnrollment(ctx, a.Account.ID, false, time.Hour)
+	token, err = s.CreateEnrollment(ctx, a.Account.ID, false, time.Hour, false)
 	if err != nil {
 		t.Fatal(err)
 	}

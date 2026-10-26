@@ -208,6 +208,7 @@ func NewCommand() *cobra.Command {
 	enrollment := &cobra.Command{Use: "enrollment", Short: "Manage install tokens"}
 	var reusable bool
 	var ttl time.Duration
+	var short bool
 	create := &cobra.Command{Use: "create", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if ttl < time.Second || ttl > 24*time.Hour {
 			return errors.New("TTL must be between 1s and 24h")
@@ -217,16 +218,20 @@ func NewCommand() *cobra.Command {
 			return e
 		}
 		var v api.Enrollment
-		if e = c.Do(cmd.Context(), "POST", api.Prefix+"/enrollment-tokens", map[string]any{"reusable": reusable, "ttl_seconds": int(ttl.Seconds())}, &v); e != nil {
+		if e = c.Do(cmd.Context(), "POST", api.Prefix+"/enrollment-tokens", map[string]any{"reusable": reusable, "ttl_seconds": int(ttl.Seconds()), "short": short}, &v); e != nil {
 			return e
 		}
 		if e = printJSON(cmd.OutOrStdout(), v); e != nil {
 			return e
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "Installer URL (bearer secret):", c.BaseURL+"/script/"+v.Token)
+		if v.ShortCode != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), "Short installer URL:", c.BaseURL+"/script/"+v.ShortCode)
+		}
 		return nil
 	}}
 	create.Flags().BoolVar(&reusable, "reusable", false, "explicitly allow multiple enrollments until expiration")
+	create.Flags().BoolVar(&short, "short", false, "generate a short 6-character code for easier URL sharing")
 	create.Flags().DurationVar(&ttl, "ttl", 15*time.Minute, "token lifetime (maximum 24h)")
 	list := &cobra.Command{Use: "ls", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		c, e := get()

@@ -56,7 +56,7 @@ func newFixture(t *testing.T) *fixture {
 	a, _ := db.Register(ctx, "alice")
 	b, _ := db.Register(ctx, "bob")
 	f := &fixture{db: db, app: app, http: http, alice: a, bob: b}
-	token, _ := db.CreateEnrollment(ctx, a.Account.ID, false, time.Minute)
+	token, _ := db.CreateEnrollment(ctx, a.Account.ID, false, time.Minute, false)
 	state, e := agent.Enroll(ctx, http.URL, token.Token, filepath.Join(t.TempDir(), "agent.json"), true)
 	if e != nil {
 		t.Fatal(e)

@@ -70,7 +70,7 @@ func TestRateLimitAndStoredSecretsNotReturned(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 	a, _ := s.Store.Register(ctx, "api-owner")
-	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, true, 15*time.Minute)
+	e, _ := s.Store.CreateEnrollment(ctx, a.Account.ID, true, 15*time.Minute, false)
 	for _, path := range []string{"/api/v1/tokens", "/api/v1/enrollment-tokens", "/api/v1/machines"} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", path, nil)

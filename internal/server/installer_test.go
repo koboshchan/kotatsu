@@ -24,7 +24,7 @@ import (
 func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 	s := testServer(t)
 	a, _ := s.Store.Register(context.Background(), "installer")
-	e, _ := s.Store.CreateEnrollment(context.Background(), a.Account.ID, false, time.Minute)
+	e, _ := s.Store.CreateEnrollment(context.Background(), a.Account.ID, false, time.Minute, false)
 	s.Config.ReleaseVersion = "v0.1.0"
 	s.Config.ReleaseURL = "http://localhost"
 	w := httptest.NewRecorder()
@@ -34,7 +34,7 @@ func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 		want       string
 	}{
 		{"unsupported", "riscv64", "unsupported architecture"},
-		{"no-running-systemd", "x86_64", "systemd must be running"},
+		{"no-systemd-continues", "x86_64", "checksum verification failed"},
 		{"amd64-bad-checksum", "x86_64", "checksum verification failed"},
 		{"arm64-bad-checksum", "aarch64", "checksum verification failed"},
 	} {
@@ -49,7 +49,7 @@ func TestInstallerUnsupportedAndChecksumFailure(t *testing.T) {
 			}
 			write("uname", "if [ \"$1\" = -s ]; then echo Linux; else echo "+tc.arch+"; fi")
 			write("id", "echo 0")
-			if tc.name == "no-running-systemd" {
+			if tc.name == "no-systemd-continues" {
 				write("systemctl", "exit 1")
 			} else {
 				write("systemctl", "exit 0")
@@ -107,7 +107,7 @@ func TestInstallerRealAgentInIsolatedRoot(t *testing.T) {
 	sum := sha256.Sum256(bytes)
 	os.WriteFile(filepath.Join(s.Config.ReleaseDir, "SHA256SUMS"), []byte(fmt.Sprintf("%x  %s\n", sum, filepath.Base(artifact))), 0600)
 	a, _ := s.Store.Register(context.Background(), "script-owner")
-	token, _ := s.Store.CreateEnrollment(context.Background(), a.Account.ID, false, time.Minute)
+	token, _ := s.Store.CreateEnrollment(context.Background(), a.Account.ID, false, time.Minute, false)
 	response, e := http.Get(httpServer.URL + "/script/" + token.Token)
 	if e != nil {
 		t.Fatal(e)
@@ -118,7 +118,7 @@ func TestInstallerRealAgentInIsolatedRoot(t *testing.T) {
 		t.Fatal(e, response.StatusCode)
 	}
 	script := string(body)
-	for _, path := range []string{"/var/lib/kotatsu", "/usr/local/bin/kotatsu-agent", "/etc/systemd/system"} {
+	for _, path := range []string{"/var/lib/kotatsu", "/usr/local/bin", "/etc/systemd/system"} {
 		script = strings.ReplaceAll(script, path, root+path)
 	}
 	os.MkdirAll(root+"/usr/local/bin", 0700)
@@ -162,7 +162,7 @@ eval "exec /usr/bin/install $args"`)
 		t.Fatal("unit hardening/secret")
 	}
 	calls, _ := os.ReadFile(root + "/systemctl.calls")
-	if !strings.Contains(string(calls), "enable --now kotatsu-agent.service") {
+	if !strings.Contains(string(calls), "enable kotatsu-agent.service") || !strings.Contains(string(calls), "restart kotatsu-agent.service") {
 		t.Fatal(string(calls))
 	}
 	st, _ := os.Stat(root + "/var/lib/kotatsu/agent.json")

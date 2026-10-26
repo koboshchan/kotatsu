@@ -12,7 +12,7 @@ import (
 // ValidateURL intentionally requires a separate development opt-in for cleartext.
 func ValidateURL(raw string, dev bool) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/" && !strings.HasSuffix(u.Path, "/releases/download")) {
 		return errors.New("server must be an absolute origin without credentials, path, query or fragment")
 	}
 	if u.Scheme != "https" && !(dev && u.Scheme == "http") {
